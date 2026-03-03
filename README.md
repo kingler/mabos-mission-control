@@ -32,17 +32,18 @@
 
 ---
 
-## 🆕 What's New in v1.3.0
+## 🆕 What's New in v1.4.0
 
-- **Agent Activity Dashboard** — Dedicated view for monitoring agent work in real-time, with mobile-optimized card layout
-- **Remote Model Discovery** — Discover and select AI models directly from your OpenClaw Gateway (`MODEL_DISCOVERY=true`)
-- **Dispatch Recovery** — Tasks stuck in `pending_dispatch` now auto-reset to planning so you can retry
-- **Planning Spec Forwarding** — Dispatch messages now include the full planning spec and agent instructions
+- **Multi-Agent Pipeline** — End-to-end lifecycle now runs as **Planning → Inbox → Assigned → In Progress → Testing → Review → Verification → Done**
+- **Core Team Bootstrap** — New workspaces auto-bootstrap a 4-agent core team: **Builder (🛠️), Tester (🧪), Reviewer (🔍), Learner (📚)**
+- **Workflow Engine Upgrades** — Queue-aware review handling, automatic stage handoffs, and fail-loopback routing with detailed reasons
+- **Learner Knowledge Loop** — Learner now captures transition outcomes and injects relevant lessons into future dispatches
+- **New Workflow APIs** — Added routes for stage failure reporting, role visibility, workspace knowledge writes, and workflow template listing
+- **Migration 013 (Fresh Start)** — Resets task/agent runtime data, sets Strict as default template, and bootstraps default workspace agents
 
 See the full [CHANGELOG](CHANGELOG.md) for details.
 
 ---
-
 ## ✨ Features
 
 🎯 **Task Management** — Kanban board with drag-and-drop across 7 status columns

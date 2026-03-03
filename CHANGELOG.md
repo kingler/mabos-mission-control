@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-03-03
+
+### Added
+- **Multi-Agent Workflow Pipeline** — Full task lifecycle now supports staged orchestration: `planning → inbox → assigned → in_progress → testing → review → verification → done`.
+- **Core Agent Bootstrap** — New workspaces can auto-bootstrap a 4-agent core team: Builder (🛠️), Tester (🧪), Reviewer (🔍), and Learner (📚).
+- **Workflow Engine Coordination** — Added queue-aware review draining (`drainQueue()`), automatic role-based stage handoffs, and fail-loopback routing.
+- **Learner Knowledge Loop** — Learner notifications on stage transitions plus knowledge injection into future dispatch messages.
+- **New API Routes**
+  - `POST /api/tasks/[id]/fail`
+  - `GET /api/tasks/[id]/roles`
+  - `POST /api/workspaces/[id]/knowledge`
+  - `GET /api/workspaces/[id]/workflows`
+
+### Changed
+- **Strict template defaults** — Strict workflow is now default, with review as queue stage and verification owned by the `reviewer` role.
+- **Workspace initialization** — New workspaces can clone workflow templates and bootstrap core agents automatically.
+- **Project branding/docs** — Updated project branding to Autensa (formerly Mission Control) and added explicit privacy-first statement in docs.
+
+### Fixed
+- **Role mismatch** — Fixed strict template verification role (`verifier` → `reviewer`).
+- **Review queue bypass** — Fixed auto-advance behavior that could skip proper review queue flow.
+- **Dispatch status transition** — Fixed dispatch route using hardcoded `done`; now uses computed next workflow status.
+- **Assigned-status resolution** — Fixed mapping so `assigned` resolves to builder stage dispatch correctly.
+- **Task template assignment** — Fixed task creation path so default workflow template is attached automatically.
+- **Learner role assignment** — Fixed missing `task_roles` learner assignment so the learner receives transition events.
+
+### Migration
+- **Migration 013: Fresh Start** — Resets runtime task/agent/event data, sets Strict as default workflow template, and bootstraps core agents for the default workspace.
+
+---
+
 ## [1.3.0] - 2026-03-02
 
 ### Added
@@ -169,6 +200,8 @@ This is the first stable, tested, and working release of Mission Control.
 
 ---
 
+[1.4.0]: https://github.com/crshdn/mission-control/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/crshdn/mission-control/releases/tag/v1.3.1
 [1.3.0]: https://github.com/crshdn/mission-control/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/crshdn/mission-control/releases/tag/v1.2.0
 [1.1.0]: https://github.com/crshdn/mission-control/releases/tag/v1.1.0
