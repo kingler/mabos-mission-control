@@ -119,7 +119,7 @@ cd mission-control
 # Install dependencies
 npm install
 
-# Configure
+# Setup
 cp .env.example .env.local
 ```
 
