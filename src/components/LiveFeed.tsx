@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { ChevronRight, ChevronLeft, Clock } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
 import type { Event } from '@/lib/types';
+import { CognitiveActivityFeed } from './mabos/CognitiveActivityFeed';
 import { formatDistanceToNow } from 'date-fns';
 
-type FeedFilter = 'all' | 'tasks' | 'agents';
+type FeedFilter = 'all' | 'tasks' | 'agents' | 'cognitive';
 
 interface LiveFeedProps {
   mobileMode?: boolean;
@@ -50,7 +51,7 @@ export function LiveFeed({ mobileMode = false, isPortrait = true }: LiveFeedProp
 
         {!effectiveMinimized && (
           <div className={`mt-3 ${mobileMode && isPortrait ? 'grid grid-cols-3 gap-2' : 'flex gap-1'}`}>
-            {(['all', 'tasks', 'agents'] as FeedFilter[]).map((tab) => (
+            {(['all', 'tasks', 'agents', 'cognitive'] as FeedFilter[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setFilter(tab)}
@@ -66,13 +67,17 @@ export function LiveFeed({ mobileMode = false, isPortrait = true }: LiveFeedProp
       </div>
 
       {!effectiveMinimized && (
-        <div className="flex-1 overflow-y-auto p-2 space-y-1 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-          {filteredEvents.length === 0 ? (
-            <div className="text-center py-8 text-mc-text-secondary text-sm">No events yet</div>
-          ) : (
-            filteredEvents.map((event) => <EventItem key={event.id} event={event} />)
-          )}
-        </div>
+        filter === 'cognitive' ? (
+          <CognitiveActivityFeed />
+        ) : (
+          <div className="flex-1 overflow-y-auto p-2 space-y-1 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+            {filteredEvents.length === 0 ? (
+              <div className="text-center py-8 text-mc-text-secondary text-sm">No events yet</div>
+            ) : (
+              filteredEvents.map((event) => <EventItem key={event.id} event={event} />)
+            )}
+          </div>
+        )
       )}
     </aside>
   );

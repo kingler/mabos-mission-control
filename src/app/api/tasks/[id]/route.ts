@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
-import { queryOne, run } from '@/lib/db';
+import { queryOne, run, queryAll } from '@/lib/db';
 import { broadcast } from '@/lib/events';
 import { getMissionControlUrl } from '@/lib/config';
 import { handleStageTransition, handleStageFailure, getTaskWorkflow, drainQueue, populateTaskRolesFromAgents } from '@/lib/workflow-engine';
-import { hasStageEvidence, canUseBoardOverride, auditBoardOverride, taskCanBeDone, recordLearnerOnTransition } from '@/lib/task-governance';
-import { syncGatewayAgentsToCatalog } from '@/lib/agent-catalog-sync';
+import { notifyLearner } from '@/lib/learner';
 import { UpdateTaskSchema } from '@/lib/validation';
 import type { Task, UpdateTaskRequest, Agent, TaskDeliverable } from '@/lib/types';
 
@@ -46,7 +45,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body: UpdateTaskRequest & { updated_by_agent_id?: string; board_override?: boolean; override_reason?: string } = await request.json();
+    const body: UpdateTaskRequest & { updated_by_agent_id?: string } = await request.json();
 
     // Validate input with Zod
     const validation = UpdateTaskSchema.safeParse(body);
@@ -64,11 +63,6 @@ export async function PATCH(
     if (!existing) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
-
-    // Keep OpenClaw agent catalog synced opportunistically on task updates
-    await syncGatewayAgentsToCatalog({ reason: 'task_patch' }).catch(err => {
-      console.warn('[Task PATCH] agent catalog sync failed:', err);
-    });
 
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -110,10 +104,6 @@ export async function PATCH(
     if (validatedData.workflow_template_id !== undefined) {
       updates.push('workflow_template_id = ?');
       values.push(validatedData.workflow_template_id);
-    }
-    if (validatedData.status_reason !== undefined) {
-      updates.push('status_reason = ?');
-      values.push(validatedData.status_reason);
     }
 
     // Track if we need to dispatch task
@@ -162,52 +152,12 @@ export async function PATCH(
 
     // Handle status change
     if (nextStatus !== undefined && nextStatus !== existing.status) {
-      const boardOverrideRequested = Boolean(body.board_override);
-      const boardOverrideAllowed = boardOverrideRequested && canUseBoardOverride(request);
-
-      // Hard evidence gate for forward-stage transitions and completion
-      const enteringQualityStage = ['testing', 'review', 'verification', 'done'].includes(nextStatus);
-      if (enteringQualityStage && !boardOverrideAllowed && !hasStageEvidence(id)) {
-        return NextResponse.json(
-          { error: 'Evidence gate failed: stage transition requires at least one deliverable and one activity note' },
-          { status: 400 }
-        );
-      }
-
-      // Failure transitions must include status_reason
-      const failingBackwards = ['testing', 'review', 'verification'].includes(existing.status) && ['in_progress', 'assigned'].includes(nextStatus);
-      if (failingBackwards && !validatedData.status_reason) {
-        return NextResponse.json({ error: 'status_reason is required when failing a stage' }, { status: 400 });
-      }
-
-      if (nextStatus === 'done' && !boardOverrideAllowed && !taskCanBeDone(id)) {
-        return NextResponse.json({ error: 'Cannot mark done: validation/evidence requirements not met' }, { status: 400 });
-      }
-
       updates.push('status = ?');
       values.push(nextStatus);
-
-      if (boardOverrideAllowed) {
-        auditBoardOverride(id, existing.status, nextStatus, body.override_reason);
-      }
 
       // Auto-dispatch when moving to assigned (if we have a valid assignee)
       if (nextStatus === 'assigned' && effectiveAssignedAgentId) {
         shouldDispatch = true;
-      }
-
-      // When a task completes, reset the assigned agent to standby (if not working on other tasks)
-      if (nextStatus === 'done' && existing.assigned_agent_id) {
-        const otherActiveTasks = queryOne<{ cnt: number }>(
-          `SELECT COUNT(*) as cnt FROM tasks WHERE assigned_agent_id = ? AND id != ? AND status IN ('assigned', 'in_progress', 'testing', 'verification')`,
-          [existing.assigned_agent_id, id]
-        );
-        if (!otherActiveTasks || otherActiveTasks.cnt === 0) {
-          run(
-            `UPDATE agents SET status = 'standby', updated_at = datetime('now') WHERE id = ? AND status = 'working'`,
-            [existing.assigned_agent_id]
-          );
-        }
       }
 
       // Log status change event
@@ -414,17 +364,29 @@ export async function PATCH(
       }
     }
 
-    // Learner must record every stage transition (non-blocking)
+    // Notify learner on stage transitions (non-blocking)
     if (nextStatus && nextStatus !== existing.status) {
-      recordLearnerOnTransition(id, existing.status, nextStatus, true).catch(err =>
-        console.error('[Learner] notification failed:', err)
-      );
+      const isForwardMove = !['inbox', 'assigned', 'planning', 'pending_dispatch'].includes(nextStatus);
+      if (isForwardMove) {
+        notifyLearner(id, {
+          previousStatus: existing.status,
+          newStatus: nextStatus,
+          passed: true,
+        }).catch(err => console.error('[Learner] notification failed:', err));
+      }
     }
 
     // Drain the review queue when a task reaches 'done' (frees the verification slot)
     if (nextStatus === 'done') {
       drainQueue(id, existing.workspace_id).catch(err =>
         console.error('[Workflow] drainQueue after done failed:', err)
+      );
+
+      // Trigger kanban rollup when task completes (non-blocking)
+      // This recalculates progress_pct up the hierarchy: Tasks → Initiatives → Campaigns → Goals
+      const missionControlUrl = getMissionControlUrl();
+      fetch(`${missionControlUrl}/api/kanban/rollup`, { method: 'POST' }).catch(err =>
+        console.error('[Kanban] Rollup trigger after task done failed:', err)
       );
     }
 

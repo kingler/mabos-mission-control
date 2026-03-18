@@ -127,6 +127,13 @@ export class MabosSyncEngine {
       console.error('[MabosSync] Activities sync failed:', err);
     }
 
+    // Rollup progress after all syncs complete
+    try {
+      this.rollupProgress();
+    } catch (err) {
+      console.error('[MabosSync] Rollup failed:', err);
+    }
+
     report.duration_ms = Date.now() - start;
 
     // Update sync state
@@ -205,7 +212,27 @@ export class MabosSyncEngine {
     const goalModel = await this.client.getGoals(this.businessId);
     const now = new Date().toISOString();
 
-    const upsert = this.db.prepare(`
+    // Build parent→child map from refinements
+    const parentMap = new Map<string, string>(); // childId → parentId
+    if (goalModel.refinements) {
+      for (const ref of goalModel.refinements) {
+        parentMap.set(ref.childGoalId, ref.parentGoalId);
+      }
+    }
+    // Also use parentGoalId field on goals themselves
+    for (const goal of goalModel.goals) {
+      if (goal.parentGoalId && !parentMap.has(goal.id)) {
+        parentMap.set(goal.id, goal.parentGoalId);
+      }
+    }
+
+    // Separate goals by level/tier
+    const strategic = goalModel.goals.filter(g => g.level === 'strategic');
+    const tactical = goalModel.goals.filter(g => g.level === 'tactical');
+    const operational = goalModel.goals.filter(g => g.level === 'operational');
+
+    // Tier 1: Strategic → kanban_goals
+    const upsertGoal = this.db.prepare(`
       INSERT INTO kanban_goals (id, business_id, title, description, meta_type, domain, stage, owner_id, priority, tags, created_at, updated_at)
       VALUES (@id, @businessId, @title, @description, @metaType, @domain, @stage, @ownerId, @priority, @tags, @now, @now)
       ON CONFLICT(id) DO UPDATE SET
@@ -213,50 +240,178 @@ export class MabosSyncEngine {
         domain = @domain, owner_id = @ownerId, priority = @priority, tags = @tags,
         updated_at = @now
     `);
-
     const findGoal = this.db.prepare('SELECT id, stage FROM kanban_goals WHERE id = ?');
 
-    for (const goal of goalModel.goals) {
+    for (const goal of strategic) {
       try {
         const domain = ACTOR_TO_DOMAIN[goal.actor || ''] || 'strategy';
-        const metaType = goal.level || 'strategic';
         const ownerId = goal.actor ? `mabos-${goal.actor}` : null;
         const priority = mapGoalPriority(goal.priority);
-        const tags = JSON.stringify({
-          level: goal.level,
-          type: goal.type,
-          actor: goal.actor,
-          mabos_priority: goal.priority,
-        });
-
+        const tags = JSON.stringify({ level: goal.level, type: goal.type, actor: goal.actor, mabos_priority: goal.priority });
         const existing = findGoal.get(goal.id) as { id: string; stage: string } | undefined;
 
-        upsert.run({
-          id: goal.id,
-          businessId: this.businessId,
-          title: goal.name,
-          description: goal.description || '',
-          metaType,
-          domain,
-          stage: existing?.stage || 'backlog',
-          ownerId,
-          priority,
-          tags,
-          now,
+        upsertGoal.run({
+          id: goal.id, businessId: this.businessId, title: goal.name,
+          description: goal.description || '', metaType: 'strategic', domain,
+          stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
         });
-
-        if (existing) {
-          if (report) report.goals.updated++;
-        } else {
-          if (report) report.goals.inserted++;
-        }
+        if (report) existing ? report.goals.updated++ : report.goals.inserted++;
       } catch (err) {
         console.error(`[MabosSync] Goal ${goal.id} sync error:`, err);
         if (report) report.goals.errors++;
       }
     }
 
+    // Tier 2: Tactical → kanban_campaigns (linked to parent strategic goal)
+    const upsertCampaign = this.db.prepare(`
+      INSERT INTO kanban_campaigns (id, goal_id, business_id, title, description, meta_type, domain, stage, owner_id, priority, tags, created_at, updated_at)
+      VALUES (@id, @goalId, @businessId, @title, @description, @metaType, @domain, @stage, @ownerId, @priority, @tags, @now, @now)
+      ON CONFLICT(id) DO UPDATE SET
+        title = @title, description = @description, meta_type = @metaType,
+        domain = @domain, owner_id = @ownerId, priority = @priority, tags = @tags,
+        updated_at = @now
+    `);
+    const findCampaign = this.db.prepare('SELECT id, stage FROM kanban_campaigns WHERE id = ?');
+
+    for (const goal of tactical) {
+      try {
+        const domain = ACTOR_TO_DOMAIN[goal.actor || ''] || 'strategy';
+        const ownerId = goal.actor ? `mabos-${goal.actor}` : null;
+        const priority = mapGoalPriority(goal.priority);
+        const tags = JSON.stringify({ level: goal.level, type: goal.type, actor: goal.actor, mabos_priority: goal.priority });
+        const parentGoalId = parentMap.get(goal.id) || strategic[0]?.id || 'G-S001';
+        const existing = findCampaign.get(goal.id) as { id: string; stage: string } | undefined;
+
+        upsertCampaign.run({
+          id: goal.id, goalId: parentGoalId, businessId: this.businessId, title: goal.name,
+          description: goal.description || '', metaType: 'tactical', domain,
+          stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
+        });
+        if (report) existing ? report.goals.updated++ : report.goals.inserted++;
+      } catch (err) {
+        console.error(`[MabosSync] Campaign ${goal.id} sync error:`, err);
+        if (report) report.goals.errors++;
+      }
+    }
+
+    // Tier 3: Operational → kanban_initiatives (linked to parent tactical campaign + grandparent goal)
+    const upsertInitiative = this.db.prepare(`
+      INSERT INTO kanban_initiatives (id, campaign_id, goal_id, business_id, title, description, meta_type, domain, stage, owner_id, priority, tags, created_at, updated_at)
+      VALUES (@id, @campaignId, @goalId, @businessId, @title, @description, @metaType, @domain, @stage, @ownerId, @priority, @tags, @now, @now)
+      ON CONFLICT(id) DO UPDATE SET
+        title = @title, description = @description, meta_type = @metaType,
+        domain = @domain, owner_id = @ownerId, priority = @priority, tags = @tags,
+        updated_at = @now
+    `);
+    const findInitiative = this.db.prepare('SELECT id, stage FROM kanban_initiatives WHERE id = ?');
+
+    for (const goal of operational) {
+      try {
+        const domain = ACTOR_TO_DOMAIN[goal.actor || ''] || 'strategy';
+        const ownerId = goal.actor ? `mabos-${goal.actor}` : null;
+        const priority = mapGoalPriority(goal.priority);
+        const tags = JSON.stringify({ level: goal.level, type: goal.type, actor: goal.actor, mabos_priority: goal.priority });
+
+        // Find parent campaign (tactical goal) and grandparent strategic goal
+        const parentCampaignId = parentMap.get(goal.id) || tactical[0]?.id || 'G-T001';
+        const grandparentGoalId = parentMap.get(parentCampaignId) || strategic[0]?.id || 'G-S001';
+        const existing = findInitiative.get(goal.id) as { id: string; stage: string } | undefined;
+
+        upsertInitiative.run({
+          id: goal.id, campaignId: parentCampaignId, goalId: grandparentGoalId,
+          businessId: this.businessId, title: goal.name,
+          description: goal.description || '', metaType: 'operational', domain,
+          stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
+        });
+        if (report) existing ? report.goals.updated++ : report.goals.inserted++;
+      } catch (err) {
+        console.error(`[MabosSync] Initiative ${goal.id} sync error:`, err);
+        if (report) report.goals.errors++;
+      }
+    }
+
     this.updateSyncState('goals', 'success');
+    console.log(`[MabosSync] Goals synced: ${strategic.length} strategic, ${tactical.length} tactical, ${operational.length} operational`);
+  }
+
+  /**
+   * Recalculate progress rollup: Tasks → Initiatives → Campaigns → Goals
+   * Called after each sync cycle to keep progress_pct current.
+   */
+  rollupProgress(): void {
+    try {
+      // 1. Initiative progress = % of done tasks
+      const initiatives = this.db.prepare('SELECT id FROM kanban_initiatives').all() as { id: string }[];
+      for (const init of initiatives) {
+        const stats = this.db.prepare(`
+          SELECT COUNT(*) as total,
+            SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) as done
+          FROM kanban_card_meta m JOIN tasks t ON t.id = m.task_id
+          WHERE m.initiative_id = ?
+        `).get(init.id) as { total: number; done: number };
+        if (stats.total > 0) {
+          const pct = Math.round((stats.done / stats.total) * 100);
+          this.db.prepare("UPDATE kanban_initiatives SET progress_pct = ?, updated_at = datetime('now') WHERE id = ?")
+            .run(pct, init.id);
+        }
+      }
+
+      // 2. Campaign progress = avg of initiative progress
+      const campaigns = this.db.prepare('SELECT id FROM kanban_campaigns').all() as { id: string }[];
+      for (const camp of campaigns) {
+        const avg = this.db.prepare(`
+          SELECT AVG(progress_pct) as avg_pct, COUNT(*) as cnt
+          FROM kanban_initiatives WHERE campaign_id = ?
+        `).get(camp.id) as { avg_pct: number | null; cnt: number };
+        if (avg.cnt > 0 && avg.avg_pct != null) {
+          this.db.prepare("UPDATE kanban_campaigns SET progress_pct = ?, updated_at = datetime('now') WHERE id = ?")
+            .run(Math.round(avg.avg_pct), camp.id);
+        }
+      }
+
+      // 3. Goal progress = avg of campaign progress (or direct task-based fallback)
+      const goals = this.db.prepare('SELECT id FROM kanban_goals').all() as { id: string }[];
+      for (const goal of goals) {
+        const campAvg = this.db.prepare(`
+          SELECT AVG(progress_pct) as avg_pct, COUNT(*) as cnt
+          FROM kanban_campaigns WHERE goal_id = ?
+        `).get(goal.id) as { avg_pct: number | null; cnt: number };
+
+        let pct = 0;
+        if (campAvg.cnt > 0 && campAvg.avg_pct != null) {
+          pct = Math.round(campAvg.avg_pct);
+        } else {
+          const taskStats = this.db.prepare(`
+            SELECT COUNT(*) as total,
+              SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) as done
+            FROM kanban_card_meta m JOIN tasks t ON t.id = m.task_id
+            WHERE m.goal_id = ?
+          `).get(goal.id) as { total: number; done: number };
+          if (taskStats.total > 0) {
+            pct = Math.round((taskStats.done / taskStats.total) * 100);
+          }
+        }
+        this.db.prepare("UPDATE kanban_goals SET progress_pct = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(pct, goal.id);
+      }
+
+      // 4. Auto-advance stages based on progress
+      // If progress hits 100%, move to 'done'; if > 0% and still 'backlog', move to 'in_progress'
+      for (const table of ['kanban_goals', 'kanban_campaigns', 'kanban_initiatives'] as const) {
+        this.db.prepare(`
+          UPDATE ${table} SET stage = 'done', updated_at = datetime('now')
+          WHERE progress_pct >= 100 AND stage NOT IN ('done', 'cancelled')
+        `).run();
+        this.db.prepare(`
+          UPDATE ${table} SET stage = 'in_progress', updated_at = datetime('now')
+          WHERE progress_pct > 0 AND progress_pct < 100 AND stage = 'backlog'
+        `).run();
+      }
+
+      console.log('[MabosSync] Rollup complete');
+    } catch (err) {
+      console.error('[MabosSync] Rollup error:', err);
+    }
   }
 
   async syncTasksFromMabos(report?: SyncReport): Promise<void> {

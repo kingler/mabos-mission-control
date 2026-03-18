@@ -6,8 +6,6 @@ import { broadcast } from '@/lib/events';
 import { getProjectsPath, getMissionControlUrl } from '@/lib/config';
 import { getRelevantKnowledge, formatKnowledgeForDispatch } from '@/lib/learner';
 import { getTaskWorkflow } from '@/lib/workflow-engine';
-import { syncGatewayAgentsToCatalog } from '@/lib/agent-catalog-sync';
-import { pickDynamicAgent } from '@/lib/task-governance';
 import type { Task, Agent, OpenClawSession, WorkflowStage, TaskImage } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -25,11 +23,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
 
-    // Keep canonical agent catalog synced before every dispatch (best-effort)
-    await syncGatewayAgentsToCatalog({ reason: 'dispatch' }).catch(err => {
-      console.warn('[Dispatch] agent catalog sync failed:', err);
-    });
-
     // Get task with agent info
     const task = queryOne<Task & { assigned_agent_name?: string; workspace_id: string }>(
       `SELECT t.*, a.name as assigned_agent_name, a.is_master
@@ -43,25 +36,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
 
-    let assignedAgentId = task.assigned_agent_id;
-    if (!assignedAgentId) {
-      const statusRoleMap: Record<string, string> = {
-        assigned: 'builder',
-        in_progress: 'builder',
-        testing: 'tester',
-        review: 'reviewer',
-        verification: 'reviewer',
-      };
-      const dynamicAgent = pickDynamicAgent(id, statusRoleMap[task.status] || 'builder');
-      if (dynamicAgent) {
-        assignedAgentId = dynamicAgent.id;
-        run('UPDATE tasks SET assigned_agent_id = ?, updated_at = datetime(\'now\') WHERE id = ?', [assignedAgentId, id]);
-      }
-    }
-
-    if (!assignedAgentId) {
+    if (!task.assigned_agent_id) {
       return NextResponse.json(
-        { error: 'Task has no routable agent' },
+        { error: 'Task has no assigned agent' },
         { status: 400 }
       );
     }
@@ -69,7 +46,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Get agent details
     const agent = queryOne<Agent>(
       'SELECT * FROM agents WHERE id = ?',
-      [assignedAgentId]
+      [task.assigned_agent_id]
     );
 
     if (!agent) {
@@ -389,18 +366,9 @@ If you need help or clarification, ask the orchestrator.`;
       });
     } catch (err) {
       console.error('Failed to send message to agent:', err);
-      // Reset task to 'assigned' so dispatch can be retried
-      run(
-        `UPDATE tasks SET status = 'assigned', planning_dispatch_error = ?, updated_at = datetime('now') WHERE id = ? AND status != 'done'`,
-        [`Dispatch delivery failed: ${(err as Error).message}`, id]
-      );
-      const failedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [id]);
-      if (failedTask) {
-        broadcast({ type: 'task_updated', payload: failedTask });
-      }
       return NextResponse.json(
-        { error: `Failed to deliver task to agent: ${(err as Error).message}` },
-        { status: 503 }
+        { error: 'Internal server error' },
+        { status: 500 }
       );
     }
   } catch (error) {

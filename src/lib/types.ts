@@ -38,6 +38,14 @@ export interface Agent {
   source: AgentSource;
   gateway_agent_id?: string;
   session_key_prefix?: string;
+  agent_type?: string;
+  autonomy_level?: string;
+  parent_agent_id?: string | null;
+  belief_count?: number;
+  goal_count?: number;
+  intention_count?: number;
+  desire_count?: number;
+  bdi_synced_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +80,13 @@ export interface Task {
   planning_dispatch_error?: string;
   planning_session_key?: string;
   images?: string; // JSON array of TaskImage objects
+  origin?: string;
+  external_id?: string;
+  mabos_plan_name?: string;
+  depends_on?: string;
+  estimated_duration?: string;
+  sync_status?: string;
+  synced_at?: string;
   created_at: string;
   updated_at: string;
   // Joined fields
@@ -368,7 +383,13 @@ export type SSEEventType =
   | 'activity_logged'
   | 'deliverable_added'
   | 'agent_spawned'
-  | 'agent_completed';
+  | 'agent_completed'
+  | 'mabos:agent_update'
+  | 'mabos:cron_executed'
+  | 'mabos:sync_complete'
+  | 'mabos:task_created'
+  | 'mabos:decision_pending'
+  | 'mabos:activity';
 
 export interface SSEEvent {
   type: SSEEventType;

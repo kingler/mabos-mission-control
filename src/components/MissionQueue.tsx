@@ -13,6 +13,7 @@ interface MissionQueueProps {
   workspaceId?: string;
   mobileMode?: boolean;
   isPortrait?: boolean;
+  initiativeFilter?: string;
 }
 
 const COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
@@ -26,9 +27,32 @@ const COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
   { id: 'done', label: 'Done', color: 'border-t-mc-accent-green' },
 ];
 
-export function MissionQueue({ workspaceId, mobileMode = false, isPortrait = true }: MissionQueueProps) {
+export function MissionQueue({ workspaceId, mobileMode = false, isPortrait = true, initiativeFilter }: MissionQueueProps) {
   const { tasks, updateTaskStatus, addEvent } = useMissionControl();
   const [compactEmptyColumns, setCompactEmptyColumns] = useState(true);
+  const [filteredTaskIds, setFilteredTaskIds] = useState<Set<string> | null>(null);
+
+  // Fetch task IDs linked to initiative when filter is set
+  useEffect(() => {
+    if (!initiativeFilter) {
+      setFilteredTaskIds(null);
+      return;
+    }
+    async function loadLinkedTasks() {
+      try {
+        const res = await fetch(`/api/kanban/cards?initiativeId=${initiativeFilter}`);
+        if (res.ok) {
+          const data = await res.json();
+          const ids = new Set<string>((data.cards || []).map((c: { task_id: string }) => c.task_id));
+          setFilteredTaskIds(ids);
+        }
+      } catch (err) {
+        console.error('Failed to load initiative tasks:', err);
+        setFilteredTaskIds(new Set());
+      }
+    }
+    loadLinkedTasks();
+  }, [initiativeFilter]);
 
   useEffect(() => {
     const cfg = getConfig();
@@ -48,7 +72,8 @@ export function MissionQueue({ workspaceId, mobileMode = false, isPortrait = tru
   const [mobileStatus, setMobileStatus] = useState<TaskStatus>('planning');
   const [statusMoveTask, setStatusMoveTask] = useState<Task | null>(null);
 
-  const getTasksByStatus = (status: TaskStatus) => tasks.filter((task) => task.status === status);
+  const activeTasks = filteredTaskIds ? tasks.filter(t => filteredTaskIds.has(t.id)) : tasks;
+  const getTasksByStatus = (status: TaskStatus) => activeTasks.filter((task) => task.status === status);
 
   const updateTaskStatusWithPersist = async (task: Task, targetStatus: TaskStatus) => {
     if (task.status === targetStatus) return;
@@ -122,7 +147,14 @@ export function MissionQueue({ workspaceId, mobileMode = false, isPortrait = tru
       <div className="p-3 border-b border-mc-border flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ChevronRight className="w-4 h-4 text-mc-text-secondary" />
-          <span className="text-sm font-medium uppercase tracking-wider">Mission Queue</span>
+          <span className="text-sm font-medium uppercase tracking-wider">
+            {initiativeFilter ? 'Initiative Tasks' : 'Mission Queue'}
+          </span>
+          {initiativeFilter && (
+            <span className="text-xs bg-mc-accent-yellow/20 text-mc-accent-yellow px-2 py-0.5 rounded">
+              Filtered
+            </span>
+          )}
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -293,6 +325,9 @@ function TaskCard({ task, onDragStart, onClick, onMoveStatus, isDragging, mobile
 
       <div className={portraitMode ? 'p-4' : 'p-3'}>
         <h4 className={`font-medium leading-snug line-clamp-2 ${portraitMode ? 'text-sm mb-3' : 'text-xs mb-2'}`}>{task.title}</h4>
+        {task.mabos_plan_name && (
+          <div className="text-[10px] text-mc-text-secondary mb-1 truncate">Plan: {task.mabos_plan_name}</div>
+        )}
 
         {isPlanning && (
           <div className={`flex items-center gap-2 ${portraitMode ? 'mb-3 py-2 px-3' : 'mb-2 py-1.5 px-2.5'} bg-purple-500/10 rounded-md border border-purple-500/20`}>
@@ -347,6 +382,12 @@ function TaskCard({ task, onDragStart, onClick, onMoveStatus, isDragging, mobile
           <div className="flex items-center gap-1.5">
             <div className={`w-1.5 h-1.5 rounded-full ${priorityDots[task.priority]}`} />
             <span className={`text-xs capitalize ${priorityStyles[task.priority]}`}>{task.priority}</span>
+            {task.origin === 'mabos' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">MABOS</span>
+            )}
+            {task.origin === 'mc' && task.sync_status === 'synced' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">MC</span>
+            )}
           </div>
           <span className="text-[10px] text-mc-text-secondary/60">{formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}</span>
         </div>

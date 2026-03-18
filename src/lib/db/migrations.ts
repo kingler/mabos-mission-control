@@ -635,7 +635,307 @@ const migrations: Migration[] = [
         console.log('[Migration 014] Added images column to tasks');
       }
     }
-  }
+  },
+  {
+    id: '015',
+    name: 'add_mabos_integration',
+    up: (db) => {
+      console.log('[Migration 015] Adding MABOS integration tables and columns...');
+
+      // 1A: New columns on agents
+      const agentsInfo = db.prepare("PRAGMA table_info(agents)").all() as { name: string }[];
+      const agentCols: [string, string][] = [
+        ['agent_type', "TEXT DEFAULT 'domain'"],
+        ['autonomy_level', "TEXT DEFAULT 'medium'"],
+        ['parent_agent_id', 'TEXT'],
+        ['belief_count', 'INTEGER DEFAULT 0'],
+        ['goal_count', 'INTEGER DEFAULT 0'],
+        ['intention_count', 'INTEGER DEFAULT 0'],
+        ['desire_count', 'INTEGER DEFAULT 0'],
+        ['bdi_synced_at', 'TEXT'],
+      ];
+      for (const [col, def] of agentCols) {
+        if (!agentsInfo.some(c => c.name === col)) {
+          db.exec(`ALTER TABLE agents ADD COLUMN ${col} ${def}`);
+          console.log(`[Migration 015] Added ${col} to agents`);
+        }
+      }
+
+      // 1B: New columns on tasks
+      const tasksInfo = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+      const taskCols: [string, string][] = [
+        ['origin', "TEXT DEFAULT 'mc'"],
+        ['external_id', 'TEXT'],
+        ['mabos_plan_name', 'TEXT'],
+        ['depends_on', 'TEXT'],
+        ['estimated_duration', 'TEXT'],
+        ['sync_status', "TEXT DEFAULT 'local'"],
+        ['synced_at', 'TEXT'],
+      ];
+      for (const [col, def] of taskCols) {
+        if (!tasksInfo.some(c => c.name === col)) {
+          db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`);
+          console.log(`[Migration 015] Added ${col} to tasks`);
+        }
+      }
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_external ON tasks(origin, external_id) WHERE external_id IS NOT NULL');
+
+      // 1C: New tables
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mabos_decisions (
+          id TEXT PRIMARY KEY,
+          business_id TEXT NOT NULL,
+          urgency TEXT,
+          agent_id TEXT,
+          description TEXT,
+          status TEXT DEFAULT 'pending',
+          feedback TEXT,
+          resolved_at TEXT,
+          synced_at TEXT NOT NULL
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mabos_cron_jobs (
+          id TEXT PRIMARY KEY,
+          business_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          schedule TEXT NOT NULL,
+          agent_id TEXT,
+          action TEXT,
+          enabled INTEGER DEFAULT 1,
+          status TEXT DEFAULT 'active',
+          last_run TEXT,
+          next_run TEXT,
+          synced_at TEXT NOT NULL
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sync_state (
+          entity_type TEXT PRIMARY KEY,
+          last_synced_at TEXT NOT NULL,
+          last_sync_status TEXT,
+          error_message TEXT
+        )
+      `);
+
+      console.log('[Migration 015] MABOS integration tables created');
+    }
+  },
+  {
+    id: '016',
+    name: 'kanban_meta_model',
+    up: (db) => {
+      console.log('[Migration 016] Creating Kanban meta-model tables...');
+
+      // Tier 1: Goals (Desires)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS kanban_goals (
+          id TEXT PRIMARY KEY,
+          business_id TEXT NOT NULL DEFAULT 'default',
+          title TEXT NOT NULL,
+          description TEXT,
+          meta_type TEXT NOT NULL DEFAULT 'strategic'
+            CHECK (meta_type IN ('strategic','operational','tactical','exploratory')),
+          domain TEXT NOT NULL DEFAULT 'strategy'
+            CHECK (domain IN ('product','marketing','finance','operations','technology','legal','hr','strategy')),
+          stage TEXT NOT NULL DEFAULT 'backlog'
+            CHECK (stage IN ('backlog','ready','in_progress','blocked','review','done','cancelled')),
+          owner_id TEXT REFERENCES agents(id),
+          priority INTEGER NOT NULL DEFAULT 5,
+          target_date TEXT,
+          progress_pct REAL NOT NULL DEFAULT 0,
+          kpi_definition TEXT,
+          tags TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+
+      // Tier 2: Campaigns (Intentions)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS kanban_campaigns (
+          id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL REFERENCES kanban_goals(id) ON DELETE CASCADE,
+          business_id TEXT NOT NULL DEFAULT 'default',
+          title TEXT NOT NULL,
+          description TEXT,
+          meta_type TEXT NOT NULL DEFAULT 'operational'
+            CHECK (meta_type IN ('strategic','operational','tactical','exploratory')),
+          domain TEXT NOT NULL DEFAULT 'strategy'
+            CHECK (domain IN ('product','marketing','finance','operations','technology','legal','hr','strategy')),
+          stage TEXT NOT NULL DEFAULT 'backlog'
+            CHECK (stage IN ('backlog','ready','in_progress','blocked','review','done','cancelled')),
+          owner_id TEXT REFERENCES agents(id),
+          priority INTEGER NOT NULL DEFAULT 5,
+          start_date TEXT,
+          end_date TEXT,
+          progress_pct REAL NOT NULL DEFAULT 0,
+          budget REAL,
+          tags TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+
+      // Tier 3: Initiatives (Active plan steps)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS kanban_initiatives (
+          id TEXT PRIMARY KEY,
+          campaign_id TEXT NOT NULL REFERENCES kanban_campaigns(id) ON DELETE CASCADE,
+          goal_id TEXT NOT NULL REFERENCES kanban_goals(id) ON DELETE CASCADE,
+          business_id TEXT NOT NULL DEFAULT 'default',
+          title TEXT NOT NULL,
+          description TEXT,
+          meta_type TEXT NOT NULL DEFAULT 'tactical'
+            CHECK (meta_type IN ('strategic','operational','tactical','exploratory')),
+          domain TEXT NOT NULL DEFAULT 'strategy'
+            CHECK (domain IN ('product','marketing','finance','operations','technology','legal','hr','strategy')),
+          stage TEXT NOT NULL DEFAULT 'backlog'
+            CHECK (stage IN ('backlog','ready','in_progress','blocked','review','done','cancelled')),
+          owner_id TEXT REFERENCES agents(id),
+          priority INTEGER NOT NULL DEFAULT 5,
+          start_date TEXT,
+          end_date TEXT,
+          progress_pct REAL NOT NULL DEFAULT 0,
+          tags TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+
+      // Tier 4: Link existing tasks to the hierarchy
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS kanban_card_meta (
+          task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+          initiative_id TEXT REFERENCES kanban_initiatives(id),
+          campaign_id TEXT REFERENCES kanban_campaigns(id),
+          goal_id TEXT NOT NULL REFERENCES kanban_goals(id),
+          meta_type TEXT NOT NULL DEFAULT 'operational'
+            CHECK (meta_type IN ('strategic','operational','tactical','exploratory')),
+          domain TEXT NOT NULL DEFAULT 'strategy'
+            CHECK (domain IN ('product','marketing','finance','operations','technology','legal','hr','strategy')),
+          story_points INTEGER,
+          tags TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+
+      // BDI declaration log
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS bdi_log (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          business_id TEXT NOT NULL DEFAULT 'default',
+          bdi_state TEXT NOT NULL
+            CHECK (bdi_state IN ('belief','desire','intention','action')),
+          transition_type TEXT NOT NULL
+            CHECK (transition_type IN ('desire_adopted','intention_committed','plan_selected','action_executed','goal_achieved','goal_dropped','belief_revised')),
+          ref_tier TEXT NOT NULL
+            CHECK (ref_tier IN ('goal','campaign','initiative','task')),
+          ref_id TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          details TEXT,
+          confidence REAL,
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+
+      // Stage transition audit trail
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS stage_transitions (
+          id TEXT PRIMARY KEY,
+          entity_tier TEXT NOT NULL
+            CHECK (entity_tier IN ('goal','campaign','initiative','task')),
+          entity_id TEXT NOT NULL,
+          from_stage TEXT NOT NULL,
+          to_stage TEXT NOT NULL,
+          agent_id TEXT,
+          reason TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+
+      // WIP limits per tier/domain/stage
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS wip_limits (
+          id TEXT PRIMARY KEY,
+          tier TEXT NOT NULL
+            CHECK (tier IN ('goal','campaign','initiative','task')),
+          domain TEXT NOT NULL
+            CHECK (domain IN ('product','marketing','finance','operations','technology','legal','hr','strategy')),
+          stage TEXT NOT NULL
+            CHECK (stage IN ('backlog','ready','in_progress','blocked','review','done','cancelled')),
+          max_items INTEGER NOT NULL DEFAULT 5,
+          current_count INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(tier, domain, stage)
+        )
+      `);
+
+      // Kanban metrics snapshots
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS kanban_metrics (
+          id TEXT PRIMARY KEY,
+          business_id TEXT NOT NULL DEFAULT 'default',
+          metric_name TEXT NOT NULL,
+          metric_value REAL NOT NULL,
+          unit TEXT NOT NULL DEFAULT 'count',
+          tier TEXT CHECK (tier IN ('goal','campaign','initiative','task')),
+          domain TEXT CHECK (domain IN ('product','marketing','finance','operations','technology','legal','hr','strategy')),
+          period_start TEXT NOT NULL,
+          period_end TEXT NOT NULL,
+          metadata TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+
+      // Indexes
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_kanban_goals_stage ON kanban_goals(stage);
+        CREATE INDEX IF NOT EXISTS idx_kanban_goals_domain ON kanban_goals(domain);
+        CREATE INDEX IF NOT EXISTS idx_kanban_goals_owner ON kanban_goals(owner_id);
+        CREATE INDEX IF NOT EXISTS idx_kanban_campaigns_goal ON kanban_campaigns(goal_id);
+        CREATE INDEX IF NOT EXISTS idx_kanban_campaigns_stage ON kanban_campaigns(stage);
+        CREATE INDEX IF NOT EXISTS idx_kanban_initiatives_campaign ON kanban_initiatives(campaign_id);
+        CREATE INDEX IF NOT EXISTS idx_kanban_initiatives_goal ON kanban_initiatives(goal_id);
+        CREATE INDEX IF NOT EXISTS idx_kanban_card_meta_goal ON kanban_card_meta(goal_id);
+        CREATE INDEX IF NOT EXISTS idx_kanban_card_meta_initiative ON kanban_card_meta(initiative_id);
+        CREATE INDEX IF NOT EXISTS idx_bdi_log_agent ON bdi_log(agent_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_bdi_log_ref ON bdi_log(ref_tier, ref_id);
+        CREATE INDEX IF NOT EXISTS idx_stage_transitions_entity ON stage_transitions(entity_tier, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_kanban_metrics_name ON kanban_metrics(metric_name, period_start);
+      `);
+
+      console.log('[Migration 016] Kanban meta-model tables created');
+    }
+  },
+  {
+    id: '017',
+    name: 'agent_activities',
+    up: (db) => {
+      console.log('[Migration 017] Creating agent_activities table...');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_activities (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          category TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          duration_ms INTEGER DEFAULT 0,
+          outcome TEXT DEFAULT 'ok',
+          error_message TEXT,
+          metadata TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_activities_agent ON agent_activities(agent_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_activities_category ON agent_activities(category, created_at DESC);
+      `);
+      console.log('[Migration 017] agent_activities table created');
+    }
+  },
 ];
 
 /**
@@ -698,3 +998,4 @@ export function getMigrationStatus(db: Database.Database): { applied: string[]; 
   const pending = migrations.filter(m => !applied.includes(m.id)).map(m => m.id);
   return { applied, pending };
 }
+

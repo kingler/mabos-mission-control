@@ -9,6 +9,7 @@ import { useEffect, useRef } from 'react';
 import { useMissionControl } from '@/lib/store';
 import { debug } from '@/lib/debug';
 import type { SSEEvent, Task } from '@/lib/types';
+import type { AgentCognitiveActivity } from '@/lib/mabos/types';
 
 export function useSSE() {
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -22,6 +23,7 @@ export function useSSE() {
     setIsOnline,
     selectedTask,
     setSelectedTask,
+    addCognitiveActivity,
   } = useMissionControl();
 
   // Update ref when selectedTask changes (outside the SSE effect)
@@ -112,6 +114,11 @@ export function useSSE() {
               debug.sse('Agent completed', sseEvent.payload);
               break;
 
+            case 'mabos:activity':
+              debug.sse('Cognitive activity', sseEvent.payload);
+              addCognitiveActivity(sseEvent.payload as AgentCognitiveActivity);
+              break;
+
             default:
               debug.sse('Unknown event type', sseEvent);
           }
@@ -153,5 +160,5 @@ export function useSSE() {
     };
   // selectedTask removed from deps to prevent re-connection loop
   // We use selectedTaskIdRef to check the current selected task ID without triggering re-renders
-  }, [addTask, removeTask, updateTask, setIsOnline, setSelectedTask]);
+  }, [addTask, removeTask, updateTask, setIsOnline, setSelectedTask, addCognitiveActivity]);
 }

@@ -3,24 +3,7 @@
 import { create } from 'zustand';
 import { debug } from './debug';
 import type { Agent, Task, Conversation, Message, Event, TaskStatus, OpenClawSession } from './types';
-
-const ACTIVE_TASK_STATUSES = new Set<TaskStatus>(['assigned', 'in_progress', 'testing', 'verification']);
-
-function reconcileAgentStatuses(agents: Agent[], tasks: Task[]): Agent[] {
-  const activeAgentIds = new Set(
-    tasks
-      .filter((t) => t.assigned_agent_id && ACTIVE_TASK_STATUSES.has(t.status as TaskStatus))
-      .map((t) => t.assigned_agent_id as string)
-  );
-
-  return agents.map((agent) => {
-    if (agent.status === 'offline') return agent;
-    return {
-      ...agent,
-      status: activeAgentIds.has(agent.id) ? 'working' : 'standby',
-    };
-  });
-}
+import type { AgentCognitiveActivity, ActivityCategory } from './mabos/types';
 
 interface MissionControlState {
   // Data
@@ -34,6 +17,10 @@ interface MissionControlState {
   // OpenClaw state
   agentOpenClawSessions: Record<string, OpenClawSession | null>; // agentId -> session
   openclawMessages: Message[]; // Messages from OpenClaw (displayed alongside regular messages)
+
+  // Cognitive Activities
+  cognitiveActivities: AgentCognitiveActivity[];
+  activityFilter: ActivityCategory | 'all';
 
   // UI State
   selectedAgent: Agent | null;
@@ -56,6 +43,11 @@ interface MissionControlState {
   setIsOnline: (online: boolean) => void;
   setIsLoading: (loading: boolean) => void;
   setSelectedBusiness: (business: string) => void;
+
+  // Cognitive activity actions
+  addCognitiveActivity: (activity: AgentCognitiveActivity) => void;
+  setCognitiveActivities: (activities: AgentCognitiveActivity[]) => void;
+  setActivityFilter: (filter: ActivityCategory | 'all') => void;
 
   // Task mutations
   updateTaskStatus: (taskId: string, status: TaskStatus) => void;
@@ -83,21 +75,25 @@ export const useMissionControl = create<MissionControlState>((set) => ({
   messages: [],
   agentOpenClawSessions: {},
   openclawMessages: [],
+  cognitiveActivities: [],
+  activityFilter: 'all' as ActivityCategory | 'all',
   selectedAgent: null,
   selectedTask: null,
   isOnline: false,
   isLoading: true,
   selectedBusiness: 'all',
 
+  // Cognitive activity setters
+  addCognitiveActivity: (activity) =>
+    set((state) => ({ cognitiveActivities: [activity, ...state.cognitiveActivities].slice(0, 200) })),
+  setCognitiveActivities: (activities) => set({ cognitiveActivities: activities }),
+  setActivityFilter: (filter) => set({ activityFilter: filter }),
+
   // Setters
-  setAgents: (agents) =>
-    set((state) => ({ agents: reconcileAgentStatuses(agents, state.tasks) })),
+  setAgents: (agents) => set({ agents }),
   setTasks: (tasks) => {
     debug.store('setTasks called', { count: tasks.length });
-    set((state) => ({
-      tasks,
-      agents: reconcileAgentStatuses(state.agents, tasks),
-    }));
+    set({ tasks });
   },
   setConversations: (conversations) => set({ conversations }),
   setEvents: (events) => set({ events }),
@@ -122,15 +118,11 @@ export const useMissionControl = create<MissionControlState>((set) => ({
   // Task mutations
   updateTaskStatus: (taskId, status) => {
     debug.store('updateTaskStatus called', { taskId, status });
-    set((state) => {
-      const tasks = state.tasks.map((task) =>
+    set((state) => ({
+      tasks: state.tasks.map((task) =>
         task.id === taskId ? { ...task, status } : task
-      );
-      return {
-        tasks,
-        agents: reconcileAgentStatuses(state.agents, tasks),
-      };
-    });
+      ),
+    }));
   },
   updateTask: (updatedTask) => {
     debug.store('updateTask called', { id: updatedTask.id, status: updatedTask.status });
@@ -145,12 +137,10 @@ export const useMissionControl = create<MissionControlState>((set) => ({
       } else {
         debug.store('Task not found in store, adding', { id: updatedTask.id });
       }
-      const tasks = state.tasks.map((task) =>
-        task.id === updatedTask.id ? updatedTask : task
-      );
       return {
-        tasks,
-        agents: reconcileAgentStatuses(state.agents, tasks),
+        tasks: state.tasks.map((task) =>
+          task.id === updatedTask.id ? updatedTask : task
+        ),
       };
     });
   },
@@ -162,22 +152,12 @@ export const useMissionControl = create<MissionControlState>((set) => ({
         debug.store('Task already exists, skipping add', { id: task.id });
         return state;
       }
-      const tasks = [task, ...state.tasks];
-      return {
-        tasks,
-        agents: reconcileAgentStatuses(state.agents, tasks),
-      };
+      return { tasks: [task, ...state.tasks] };
     });
   },
   removeTask: (taskId) => {
     debug.store('removeTask called', { taskId });
-    set((state) => {
-      const tasks = state.tasks.filter((task) => task.id !== taskId);
-      return {
-        tasks,
-        agents: reconcileAgentStatuses(state.agents, tasks),
-      };
-    });
+    set((state) => ({ tasks: state.tasks.filter((task) => task.id !== taskId) }));
   },
 
   // Agent mutations

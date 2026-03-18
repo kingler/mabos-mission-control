@@ -3,18 +3,20 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronLeft, ListTodo, Users, Activity, Settings as SettingsIcon, ExternalLink, Home, BarChart3 } from 'lucide-react';
+import { ChevronLeft, ListTodo, Users, Activity, Settings as SettingsIcon, ExternalLink, Home, BarChart3, Target } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { AgentsSidebar } from '@/components/AgentsSidebar';
 import { MissionQueue } from '@/components/MissionQueue';
+import { CenterPanel } from '@/components/CenterPanel';
 import { LiveFeed } from '@/components/LiveFeed';
 import { SSEDebugPanel } from '@/components/SSEDebugPanel';
 import { useMissionControl } from '@/lib/store';
 import { useSSE } from '@/hooks/useSSE';
 import { debug } from '@/lib/debug';
 import type { Task, Workspace } from '@/lib/types';
+import type { WorkspaceView, DrillDownState } from '@/components/kanban/GoalAncestry';
 
-type MobileTab = 'queue' | 'agents' | 'feed' | 'settings';
+type MobileTab = 'queue' | 'agents' | 'feed' | 'settings' | 'kanban';
 
 export default function WorkspacePage() {
   const params = useParams();
@@ -26,6 +28,8 @@ export default function WorkspacePage() {
   const [notFound, setNotFound] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>('queue');
   const [isPortrait, setIsPortrait] = useState(true);
+  const [activeView, setActiveView] = useState<WorkspaceView>('queue');
+  const [drillDown, setDrillDown] = useState<DrillDownState>({});
 
   useSSE();
 
@@ -175,6 +179,57 @@ export default function WorkspacePage() {
     };
   }, [workspace, setAgents, setTasks, setEvents, setIsOnline, setIsLoading]);
 
+  const handleViewChange = (view: WorkspaceView) => {
+    setActiveView(view);
+    if (view === 'queue' || view === 'goals' || view === 'metrics' || view === 'monitor') {
+      setDrillDown({});
+    }
+  };
+
+  const handleDrillDown = (view: WorkspaceView, id: string, title: string) => {
+    if (view === 'campaigns') {
+      setDrillDown(prev => ({ ...prev, goalId: id, goalTitle: title }));
+      setActiveView('campaigns');
+    } else if (view === 'initiatives') {
+      setDrillDown(prev => ({ ...prev, campaignId: id, campaignTitle: title }));
+      setActiveView('initiatives');
+    } else if (view === 'delivery') {
+      setDrillDown(prev => ({ ...prev, initiativeId: id, initiativeTitle: title }));
+      setActiveView('delivery');
+    }
+  };
+
+  const handleDrillUp = (view: WorkspaceView) => {
+    if (view === 'queue') {
+      setActiveView('queue');
+      setDrillDown({});
+    } else if (view === 'goals') {
+      setActiveView('goals');
+      setDrillDown({});
+    } else if (view === 'campaigns') {
+      setActiveView('campaigns');
+      setDrillDown(prev => ({
+        goalId: prev.goalId,
+        goalTitle: prev.goalTitle,
+      }));
+    } else if (view === 'initiatives') {
+      setActiveView('initiatives');
+      setDrillDown(prev => ({
+        goalId: prev.goalId,
+        goalTitle: prev.goalTitle,
+        campaignId: prev.campaignId,
+        campaignTitle: prev.campaignTitle,
+      }));
+    } else {
+      setActiveView(view);
+    }
+  };
+
+  // Map workspace slug to kanban business_id
+  // TODO: Add business_id column to workspaces table for multi-business support
+  const WORKSPACE_BUSINESS_MAP: Record<string, string> = { 'default': 'vividwalls' };
+  const businessId = WORKSPACE_BUSINESS_MAP[workspace?.slug || ''] || workspace?.slug || 'vividwalls';
+
   if (notFound) {
     return (
       <div className="min-h-screen bg-mc-bg flex items-center justify-center">
@@ -209,8 +264,15 @@ export default function WorkspacePage() {
       <Header workspace={workspace} isPortrait={isPortrait} />
 
       <div className="hidden lg:flex flex-1 overflow-hidden">
-        <AgentsSidebar workspaceId={workspace.id} />
-        <MissionQueue workspaceId={workspace.id} />
+        <AgentsSidebar workspaceId={workspace.id} activeView={activeView} onViewChange={handleViewChange} />
+        <CenterPanel
+          activeView={activeView}
+          workspaceId={workspace.id}
+          businessId={businessId}
+          drillDown={drillDown}
+          onDrillDown={handleDrillDown}
+          onDrillUp={handleDrillUp}
+        />
         <LiveFeed />
       </div>
 
@@ -222,6 +284,18 @@ export default function WorkspacePage() {
         {isPortrait ? (
           <>
             {mobileTab === 'queue' && <MissionQueue workspaceId={workspace.id} mobileMode isPortrait />}
+            {mobileTab === 'kanban' && (
+              <CenterPanel
+                activeView={activeView === 'queue' ? 'goals' : activeView}
+                workspaceId={workspace.id}
+                businessId={businessId}
+                drillDown={drillDown}
+                onDrillDown={handleDrillDown}
+                onDrillUp={handleDrillUp}
+                mobileMode
+                isPortrait
+              />
+            )}
             {mobileTab === 'agents' && (
               <div className="h-full p-3 overflow-y-auto">
                 <AgentsSidebar workspaceId={workspace.id} mobileMode isPortrait />
@@ -275,8 +349,9 @@ export default function WorkspacePage() {
 
       {showMobileBottomTabs && (
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-mc-border bg-mc-bg-secondary pb-[env(safe-area-inset-bottom)]">
-          <div className="grid grid-cols-4 gap-1 p-2">
+          <div className="grid grid-cols-5 gap-1 p-2">
             <MobileTabButton label="Queue" active={mobileTab === 'queue'} icon={<ListTodo className="w-5 h-5" />} onClick={() => setMobileTab('queue')} />
+            <MobileTabButton label="Kanban" active={mobileTab === 'kanban'} icon={<Target className="w-5 h-5" />} onClick={() => setMobileTab('kanban')} />
             <MobileTabButton label="Agents" active={mobileTab === 'agents'} icon={<Users className="w-5 h-5" />} onClick={() => setMobileTab('agents')} />
             <MobileTabButton label="Feed" active={mobileTab === 'feed'} icon={<Activity className="w-5 h-5" />} onClick={() => setMobileTab('feed')} />
             <MobileTabButton label="Settings" active={mobileTab === 'settings'} icon={<SettingsIcon className="w-5 h-5" />} onClick={() => setMobileTab('settings')} />

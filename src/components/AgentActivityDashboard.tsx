@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, AlertTriangle, Activity, Clock, Filter, RefreshCw } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Activity, Clock, Filter, RefreshCw, Brain, Database, BookOpen, Lightbulb, MessageSquare, GitBranch } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import type { Agent, Event, Task, Workspace } from '@/lib/types';
 
@@ -18,6 +18,7 @@ export function AgentActivityDashboard({ workspace }: AgentActivityDashboardProp
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ActivityFilter>('all');
+  const [agentActivities, setAgentActivities] = useState<Record<string, any[]>>({});
   const [isPortrait, setIsPortrait] = useState(true);
   const [sseConnected, setSseConnected] = useState(false);
 
@@ -54,6 +55,20 @@ export function AgentActivityDashboard({ workspace }: AgentActivityDashboardProp
         if (agentsRes.ok) setAgents(await agentsRes.json());
         if (tasksRes.ok) setTasks(await tasksRes.json());
         if (eventsRes.ok) setEvents(await eventsRes.json());
+
+        // Load cognitive activities per MABOS agent
+        try {
+          const activitiesRes = await fetch('/api/mabos/activities?limit=100');
+          if (activitiesRes.ok) {
+            const { activities } = await activitiesRes.json();
+            const byAgent: Record<string, any[]> = {};
+            for (const a of activities || []) {
+              if (!byAgent[a.agent_id]) byAgent[a.agent_id] = [];
+              if (byAgent[a.agent_id].length < 5) byAgent[a.agent_id].push(a);
+            }
+            if (mounted) setAgentActivities(byAgent);
+          }
+        } catch {}
       } catch (error) {
         console.error('Failed to load activity dashboard data:', error);
       } finally {
@@ -312,6 +327,39 @@ export function AgentActivityDashboard({ workspace }: AgentActivityDashboardProp
                       ))
                     )}
                   </div>
+
+                  {/* Recent Cognitive Activity */}
+                  {(() => {
+                    const gatewayId = agent.gateway_agent_id || agent.id.replace('mabos-', '');
+                    const recentActivities = agentActivities[gatewayId] || agentActivities[agent.id] || [];
+                    if (recentActivities.length === 0) return null;
+
+                    const categoryIcon = (cat: string) => {
+                      switch (cat) {
+                        case 'bdi': return <Brain className="w-3 h-3 text-purple-400" />;
+                        case 'memory': return <Database className="w-3 h-3 text-blue-400" />;
+                        case 'knowledge': return <BookOpen className="w-3 h-3 text-green-400" />;
+                        case 'reasoning': return <Lightbulb className="w-3 h-3 text-orange-400" />;
+                        case 'communication': return <MessageSquare className="w-3 h-3 text-yellow-400" />;
+                        default: return <GitBranch className="w-3 h-3 text-gray-400" />;
+                      }
+                    };
+
+                    return (
+                      <div className="mt-3 pt-3 border-t border-mc-border">
+                        <div className="text-xs font-medium uppercase text-mc-text-secondary mb-2">Recent Cognitive Activity</div>
+                        {recentActivities.map((activity: any) => (
+                          <div key={activity.id} className="flex items-center gap-2 py-1">
+                            {categoryIcon(activity.category)}
+                            <span className="text-xs text-mc-text truncate flex-1">{activity.summary}</span>
+                            <span className="text-[10px] text-mc-text-secondary whitespace-nowrap">
+                              {activity.created_at ? formatDistanceToNow(new Date(activity.created_at), { addSuffix: true }) : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </article>
               );
             })}
