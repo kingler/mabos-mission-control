@@ -255,7 +255,7 @@ export class MabosSyncEngine {
           description: goal.description || '', metaType: 'strategic', domain,
           stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
         });
-        if (report) existing ? report.goals.updated++ : report.goals.inserted++;
+        if (report) { if (existing) report.goals.updated++; else report.goals.inserted++; }
       } catch (err) {
         console.error(`[MabosSync] Goal ${goal.id} sync error:`, err);
         if (report) report.goals.errors++;
@@ -287,7 +287,7 @@ export class MabosSyncEngine {
           description: goal.description || '', metaType: 'tactical', domain,
           stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
         });
-        if (report) existing ? report.goals.updated++ : report.goals.inserted++;
+        if (report) { if (existing) report.goals.updated++; else report.goals.inserted++; }
       } catch (err) {
         console.error(`[MabosSync] Campaign ${goal.id} sync error:`, err);
         if (report) report.goals.errors++;
@@ -323,7 +323,7 @@ export class MabosSyncEngine {
           description: goal.description || '', metaType: 'operational', domain,
           stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
         });
-        if (report) existing ? report.goals.updated++ : report.goals.inserted++;
+        if (report) { if (existing) report.goals.updated++; else report.goals.inserted++; }
       } catch (err) {
         console.error(`[MabosSync] Initiative ${goal.id} sync error:`, err);
         if (report) report.goals.errors++;
