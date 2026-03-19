@@ -212,27 +212,8 @@ export class MabosSyncEngine {
     const goalModel = await this.client.getGoals(this.businessId);
     const now = new Date().toISOString();
 
-    // Build parent→child map from refinements
-    const parentMap = new Map<string, string>(); // childId → parentId
-    if (goalModel.refinements) {
-      for (const ref of goalModel.refinements) {
-        parentMap.set(ref.childGoalId, ref.parentGoalId);
-      }
-    }
-    // Also use parentGoalId field on goals themselves
-    for (const goal of goalModel.goals) {
-      if (goal.parentGoalId && !parentMap.has(goal.id)) {
-        parentMap.set(goal.id, goal.parentGoalId);
-      }
-    }
-
-    // Separate goals by level/tier
-    const strategic = goalModel.goals.filter(g => g.level === 'strategic');
-    const tactical = goalModel.goals.filter(g => g.level === 'tactical');
-    const operational = goalModel.goals.filter(g => g.level === 'operational');
-
-    // Tier 1: Strategic → kanban_goals
-    const upsertGoal = this.db.prepare(`
+    // All 42 goals go into kanban_goals (strategic, tactical, operational)
+    const upsert = this.db.prepare(`
       INSERT INTO kanban_goals (id, business_id, title, description, meta_type, domain, stage, owner_id, priority, tags, created_at, updated_at)
       VALUES (@id, @businessId, @title, @description, @metaType, @domain, @stage, @ownerId, @priority, @tags, @now, @now)
       ON CONFLICT(id) DO UPDATE SET
@@ -240,21 +221,39 @@ export class MabosSyncEngine {
         domain = @domain, owner_id = @ownerId, priority = @priority, tags = @tags,
         updated_at = @now
     `);
+
     const findGoal = this.db.prepare('SELECT id, stage FROM kanban_goals WHERE id = ?');
 
-    for (const goal of strategic) {
+    for (const goal of goalModel.goals) {
       try {
         const domain = ACTOR_TO_DOMAIN[goal.actor || ''] || 'strategy';
+        const metaType = goal.level || 'strategic';
         const ownerId = goal.actor ? `mabos-${goal.actor}` : null;
         const priority = mapGoalPriority(goal.priority);
-        const tags = JSON.stringify({ level: goal.level, type: goal.type, actor: goal.actor, mabos_priority: goal.priority });
+        const tags = JSON.stringify({
+          level: goal.level,
+          type: goal.type,
+          actor: goal.actor,
+          mabos_priority: goal.priority,
+          parentGoalId: goal.parentGoalId || null,
+        });
+
         const existing = findGoal.get(goal.id) as { id: string; stage: string } | undefined;
 
-        upsertGoal.run({
-          id: goal.id, businessId: this.businessId, title: goal.name,
-          description: goal.description || '', metaType: 'strategic', domain,
-          stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
+        upsert.run({
+          id: goal.id,
+          businessId: this.businessId,
+          title: goal.name,
+          description: goal.description || '',
+          metaType,
+          domain,
+          stage: existing?.stage || 'backlog',
+          ownerId,
+          priority,
+          tags,
+          now,
         });
+
         if (report) { if (existing) report.goals.updated++; else report.goals.inserted++; }
       } catch (err) {
         console.error(`[MabosSync] Goal ${goal.id} sync error:`, err);
@@ -262,76 +261,8 @@ export class MabosSyncEngine {
       }
     }
 
-    // Tier 2: Tactical → kanban_campaigns (linked to parent strategic goal)
-    const upsertCampaign = this.db.prepare(`
-      INSERT INTO kanban_campaigns (id, goal_id, business_id, title, description, meta_type, domain, stage, owner_id, priority, tags, created_at, updated_at)
-      VALUES (@id, @goalId, @businessId, @title, @description, @metaType, @domain, @stage, @ownerId, @priority, @tags, @now, @now)
-      ON CONFLICT(id) DO UPDATE SET
-        title = @title, description = @description, meta_type = @metaType,
-        domain = @domain, owner_id = @ownerId, priority = @priority, tags = @tags,
-        updated_at = @now
-    `);
-    const findCampaign = this.db.prepare('SELECT id, stage FROM kanban_campaigns WHERE id = ?');
-
-    for (const goal of tactical) {
-      try {
-        const domain = ACTOR_TO_DOMAIN[goal.actor || ''] || 'strategy';
-        const ownerId = goal.actor ? `mabos-${goal.actor}` : null;
-        const priority = mapGoalPriority(goal.priority);
-        const tags = JSON.stringify({ level: goal.level, type: goal.type, actor: goal.actor, mabos_priority: goal.priority });
-        const parentGoalId = parentMap.get(goal.id) || strategic[0]?.id || 'G-S001';
-        const existing = findCampaign.get(goal.id) as { id: string; stage: string } | undefined;
-
-        upsertCampaign.run({
-          id: goal.id, goalId: parentGoalId, businessId: this.businessId, title: goal.name,
-          description: goal.description || '', metaType: 'tactical', domain,
-          stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
-        });
-        if (report) { if (existing) report.goals.updated++; else report.goals.inserted++; }
-      } catch (err) {
-        console.error(`[MabosSync] Campaign ${goal.id} sync error:`, err);
-        if (report) report.goals.errors++;
-      }
-    }
-
-    // Tier 3: Operational → kanban_initiatives (linked to parent tactical campaign + grandparent goal)
-    const upsertInitiative = this.db.prepare(`
-      INSERT INTO kanban_initiatives (id, campaign_id, goal_id, business_id, title, description, meta_type, domain, stage, owner_id, priority, tags, created_at, updated_at)
-      VALUES (@id, @campaignId, @goalId, @businessId, @title, @description, @metaType, @domain, @stage, @ownerId, @priority, @tags, @now, @now)
-      ON CONFLICT(id) DO UPDATE SET
-        title = @title, description = @description, meta_type = @metaType,
-        domain = @domain, owner_id = @ownerId, priority = @priority, tags = @tags,
-        updated_at = @now
-    `);
-    const findInitiative = this.db.prepare('SELECT id, stage FROM kanban_initiatives WHERE id = ?');
-
-    for (const goal of operational) {
-      try {
-        const domain = ACTOR_TO_DOMAIN[goal.actor || ''] || 'strategy';
-        const ownerId = goal.actor ? `mabos-${goal.actor}` : null;
-        const priority = mapGoalPriority(goal.priority);
-        const tags = JSON.stringify({ level: goal.level, type: goal.type, actor: goal.actor, mabos_priority: goal.priority });
-
-        // Find parent campaign (tactical goal) and grandparent strategic goal
-        const parentCampaignId = parentMap.get(goal.id) || tactical[0]?.id || 'G-T001';
-        const grandparentGoalId = parentMap.get(parentCampaignId) || strategic[0]?.id || 'G-S001';
-        const existing = findInitiative.get(goal.id) as { id: string; stage: string } | undefined;
-
-        upsertInitiative.run({
-          id: goal.id, campaignId: parentCampaignId, goalId: grandparentGoalId,
-          businessId: this.businessId, title: goal.name,
-          description: goal.description || '', metaType: 'operational', domain,
-          stage: existing?.stage || 'backlog', ownerId, priority, tags, now,
-        });
-        if (report) { if (existing) report.goals.updated++; else report.goals.inserted++; }
-      } catch (err) {
-        console.error(`[MabosSync] Initiative ${goal.id} sync error:`, err);
-        if (report) report.goals.errors++;
-      }
-    }
-
     this.updateSyncState('goals', 'success');
-    console.log(`[MabosSync] Goals synced: ${strategic.length} strategic, ${tactical.length} tactical, ${operational.length} operational`);
+    console.log(`[MabosSync] Goals synced: ${goalModel.goals.length} total`);
   }
 
   /**
