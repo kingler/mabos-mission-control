@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     for (const ct of createdTasks) {
       const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(ct.taskId);
-      broadcast({ type: 'task_created', payload: task });
+      broadcast({ type: 'task_created', payload: task } as unknown as import('@/lib/types').SSEEvent);
     }
 
     const base = process.env.NEXT_PUBLIC_BASE_URL || process.env.MC_URL || 'http://localhost:4000';

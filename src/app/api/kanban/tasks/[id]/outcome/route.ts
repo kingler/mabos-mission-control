@@ -72,7 +72,7 @@ export async function POST(
     `).run(uuidv4(), `task_${status}`, agentId, taskId, `Agent reported task ${status}`, now);
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
-    broadcast({ type: 'task_updated', payload: updated });
+    broadcast({ type: 'task_updated', payload: updated } as unknown as import('@/lib/types').SSEEvent);
 
     const base = process.env.NEXT_PUBLIC_BASE_URL || process.env.MC_URL || 'http://localhost:4000';
     fetch(`${base}/api/kanban/rollup`, { method: 'POST' }).catch(err =>

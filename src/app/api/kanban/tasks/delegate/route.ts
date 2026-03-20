@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     );
 
     const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
-    broadcast({ type: 'task_updated', payload: updated });
+    broadcast({ type: 'task_updated', payload: updated } as unknown as import('@/lib/types').SSEEvent);
 
     return NextResponse.json({
       taskId,
