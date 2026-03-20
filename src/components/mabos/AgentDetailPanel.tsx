@@ -29,6 +29,9 @@ export function AgentDetailPanel({ agentId, agentName, onClose }: AgentDetailPan
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setSelectedFile(null);
+    setFileContent(null);
+    setTab('files');
     loadData();
   }, [agentId]);
 
