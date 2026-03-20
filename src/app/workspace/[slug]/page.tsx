@@ -181,7 +181,7 @@ export default function WorkspacePage() {
 
   const handleViewChange = (view: WorkspaceView) => {
     setActiveView(view);
-    if (view === 'queue' || view === 'goals' || view === 'metrics' || view === 'monitor') {
+    if (view === 'queue' || view === 'goals' || view === 'metrics' || view === 'monitor' || view === 'graph') {
       setDrillDown({});
     }
   };

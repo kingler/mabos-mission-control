@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, ChevronRight, ChevronLeft, Zap, ZapOff, Loader2, Search, Brain, Target, AlertTriangle, Clock, MessageSquare, BarChart3, Activity, ListTodo, Shield } from 'lucide-react';
+import { Plus, ChevronRight, ChevronLeft, Zap, ZapOff, Loader2, Search, Brain, Target, AlertTriangle, Clock, MessageSquare, BarChart3, Activity, ListTodo, Shield, Share2 } from 'lucide-react';
 import Link from 'next/link';
 import { useMissionControl } from '@/lib/store';
 import type { Agent, AgentStatus, OpenClawSession } from '@/lib/types';
@@ -312,6 +312,15 @@ export function AgentsSidebar({ workspaceId, mobileMode = false, isPortrait = tr
               >
                 <Shield className="w-4 h-4" />
                 <span>Monitor</span>
+              </button>
+              <button
+                onClick={() => onViewChange?.('graph')}
+                className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
+                  activeView === 'graph' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
+                }`}
+              >
+                <Share2 className="w-4 h-4" />
+                <span>Graph</span>
               </button>
             </div>
           </div>

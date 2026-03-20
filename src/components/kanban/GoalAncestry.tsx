@@ -2,7 +2,7 @@
 
 import { ChevronRight, Home } from 'lucide-react';
 
-export type WorkspaceView = 'queue' | 'goals' | 'campaigns' | 'initiatives' | 'delivery' | 'metrics' | 'monitor';
+export type WorkspaceView = 'queue' | 'goals' | 'campaigns' | 'initiatives' | 'delivery' | 'metrics' | 'monitor' | 'graph';
 
 export interface DrillDownState {
   goalId?: string;
@@ -58,6 +58,18 @@ export function GoalAncestry({ drillDown, onNavigate, activeView }: GoalAncestry
         </button>
         <ChevronRight className="w-3 h-3 text-mc-text-secondary" />
         <span className="text-mc-text font-medium">Monitor</span>
+      </div>
+    );
+  }
+
+  if (activeView === 'graph') {
+    return (
+      <div className="px-4 py-2 border-b border-mc-border bg-mc-bg-secondary/50 flex items-center gap-2 text-sm">
+        <button onClick={() => onNavigate('queue')} className="text-mc-text-secondary hover:text-mc-accent transition-colors">
+          <Home className="w-4 h-4" />
+        </button>
+        <ChevronRight className="w-3 h-3 text-mc-text-secondary" />
+        <span className="text-mc-text font-medium">Graph</span>
       </div>
     );
   }

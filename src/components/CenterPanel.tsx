@@ -7,6 +7,7 @@ import { InitiativeBoard } from './kanban/InitiativeBoard';
 import { MonitorDashboard } from './kanban/MonitorDashboard';
 import { MissionQueue } from './MissionQueue';
 import MetricsDashboard from './mabos/MetricsDashboard';
+import { GraphView } from './graph/GraphView';
 
 interface CenterPanelProps {
   activeView: WorkspaceView;
@@ -78,6 +79,8 @@ export function CenterPanel({
       )}
 
       {activeView === 'monitor' && <MonitorDashboard />}
+
+      {activeView === 'graph' && <GraphView businessId={businessId} />}
     </div>
   );
 }
