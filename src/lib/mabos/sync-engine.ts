@@ -148,12 +148,18 @@ export class MabosSyncEngine {
     const now = new Date().toISOString();
 
     // Agent hierarchy: known parent mappings based on MABOS org structure
+    // Only agents in this map are synced — prevents phantom sub-agents from appearing
     const HIERARCHY: Record<string, string | null> = {
       'ceo': null,
       'cfo': 'ceo', 'cmo': 'ceo', 'coo': 'ceo', 'cto': 'ceo',
       'hr': 'ceo', 'legal': 'ceo', 'strategy': 'ceo',
       'knowledge': 'ceo', 'ecommerce': 'ceo',
       'lead-gen': 'cmo', 'sales-research': 'cmo', 'outreach': 'cmo',
+      // Domain agents (report to C-suite)
+      'compliance-director': 'legal', 'creative-director': 'cmo',
+      'cs-director': 'coo', 'fulfillment-mgr': 'coo',
+      'inventory-mgr': 'coo', 'marketing-director': 'cmo',
+      'product-mgr': 'coo', 'sales-director': 'cmo',
     };
 
     const upsertAgent = this.db.prepare(`
@@ -172,9 +178,16 @@ export class MabosSyncEngine {
       ceo: '👔', cfo: '💰', cmo: '📣', coo: '⚙️', cto: '💻',
       hr: '🧑‍💼', legal: '⚖️', strategy: '🎯', knowledge: '📚', ecommerce: '🛒',
       'lead-gen': '🎣', 'sales-research': '🔍', outreach: '📧',
+      'compliance-director': '🛡️', 'creative-director': '🎨',
+      'cs-director': '🎧', 'fulfillment-mgr': '📦',
+      'inventory-mgr': '📋', 'marketing-director': '📢',
+      'product-mgr': '📐', 'sales-director': '💼',
     };
 
     for (const agent of agents) {
+      // Skip agents not in the known hierarchy to prevent phantom entries
+      if (!(agent.id in HIERARCHY)) continue;
+
       try {
         const agentId = `mabos-${agent.id}`;
         const parentRaw = HIERARCHY[agent.id];
