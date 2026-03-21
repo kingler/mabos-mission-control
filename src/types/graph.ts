@@ -1,7 +1,7 @@
 export interface GraphNode {
   id: string;
   label: string;
-  type: 'agent' | 'goal' | 'plan' | 'task' | 'campaign' | 'initiative';
+  type: 'agent' | 'goal' | 'plan' | 'task' | 'campaign' | 'initiative' | 'skill';
   status?: string;
   agent?: string;
   tier?: number;
@@ -27,5 +27,6 @@ export interface GraphFilters {
   showTasks: boolean;
   showCampaigns: boolean;
   showInitiatives: boolean;
+  showSkills: boolean;
   selectedAgent: string | null;
 }

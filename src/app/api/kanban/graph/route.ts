@@ -13,6 +13,7 @@ interface GoalRow {
   id: string;
   title: string;
   stage: string;
+  domain: string;
   owner_id: string | null;
 }
 
@@ -22,6 +23,15 @@ interface CampaignRow {
   title: string;
   stage: string;
   owner_id: string | null;
+}
+
+interface PlanRow {
+  id: string;
+  agent_id: string;
+  goal_id: string | null;
+  title: string;
+  status: string;
+  source: string;
 }
 
 interface InitiativeRow {
@@ -43,6 +53,16 @@ interface TaskRow {
   campaign_id: string | null;
 }
 
+interface SkillRow {
+  skill_name: string;
+  category: string;
+  description: string;
+}
+
+interface AgentSkillRow {
+  agent_id: string;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -58,12 +78,17 @@ export async function GET(request: NextRequest) {
     );
 
     const goals = queryAll<GoalRow>(
-      'SELECT id, title, stage, owner_id FROM kanban_goals WHERE business_id = ?',
+      'SELECT id, title, stage, domain, owner_id FROM kanban_goals WHERE business_id = ?',
       [businessId]
     );
 
     const campaigns = queryAll<CampaignRow>(
       'SELECT id, goal_id, title, stage, owner_id FROM kanban_campaigns WHERE business_id = ?',
+      [businessId]
+    );
+
+    const plans = queryAll<PlanRow>(
+      'SELECT id, agent_id, goal_id, title, status, source FROM agent_plans WHERE business_id = ?',
       [businessId]
     );
 
@@ -132,6 +157,27 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Plan nodes + goal->plan and agent->plan links
+    for (const plan of plans) {
+      if (agentFilter && plan.agent_id !== agentFilter) continue;
+      nodeIds.add(plan.id);
+      nodes.push({
+        id: plan.id,
+        label: plan.title,
+        type: 'plan',
+        status: plan.status,
+        agent: plan.agent_id,
+        tier: 2.5,
+        val: 5,
+      });
+      if (plan.goal_id && nodeIds.has(plan.goal_id)) {
+        links.push({ source: plan.goal_id, target: plan.id, relation: 'executes' });
+      }
+      if (nodeIds.has(plan.agent_id)) {
+        links.push({ source: plan.agent_id, target: plan.id, relation: 'owns' });
+      }
+    }
+
     // Initiative nodes + campaign->initiative links
     const campaignIds = new Set(campaigns.map(c => c.id));
     for (const initiative of initiatives) {
@@ -177,7 +223,52 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ nodes, links });
+    // Skill nodes — deduplicated by skill_name, linked to agents via possesses
+    const skills = queryAll<SkillRow>(
+      'SELECT DISTINCT skill_name, category, description FROM agent_skills WHERE business_id = ?',
+      [businessId]
+    );
+
+    for (const s of skills) {
+      const skillNodeId = `skill--${s.skill_name}`;
+      nodeIds.add(skillNodeId);
+      nodes.push({
+        id: skillNodeId,
+        label: s.skill_name,
+        type: 'skill',
+        tier: 5,
+        val: 1,
+      });
+
+      const agentSkills = queryAll<AgentSkillRow>(
+        'SELECT DISTINCT agent_id FROM agent_skills WHERE skill_name = ? AND business_id = ?',
+        [s.skill_name, businessId]
+      );
+
+      for (const as of agentSkills) {
+        if (nodeIds.has(as.agent_id)) {
+          links.push({ source: as.agent_id, target: skillNodeId, relation: 'possesses' });
+        }
+      }
+    }
+
+    return NextResponse.json({
+      nodes,
+      links,
+      meta: {
+        nodeCount: nodes.length,
+        linkCount: links.length,
+        breakdown: {
+          agents: nodes.filter(n => n.type === 'agent').length,
+          goals: nodes.filter(n => n.type === 'goal').length,
+          campaigns: nodes.filter(n => n.type === 'campaign').length,
+          plans: nodes.filter(n => n.type === 'plan').length,
+          initiatives: nodes.filter(n => n.type === 'initiative').length,
+          tasks: nodes.filter(n => n.type === 'task').length,
+          skills: nodes.filter(n => n.type === 'skill').length,
+        },
+      },
+    });
   } catch (error) {
     console.error('[Graph API] Error:', error);
     return NextResponse.json(

@@ -936,6 +936,64 @@ const migrations: Migration[] = [
       console.log('[Migration 017] agent_activities table created');
     }
   },
+  {
+    id: '018',
+    name: 'add_plans_skills_tables',
+    up: (db) => {
+      console.log('[Migration 018] Adding agent_plans, plan_steps, and agent_skills tables...');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_plans (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          goal_id TEXT,
+          title TEXT NOT NULL,
+          source TEXT DEFAULT 'htn-generated',
+          status TEXT DEFAULT 'active',
+          confidence REAL,
+          strategy TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_plans_agent ON agent_plans(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_plans_goal ON agent_plans(goal_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plan_steps (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL REFERENCES agent_plans(id),
+          step_number INTEGER,
+          description TEXT NOT NULL,
+          step_type TEXT DEFAULT 'primitive',
+          assigned_to TEXT,
+          depends_on TEXT,
+          status TEXT DEFAULT 'pending',
+          estimated_duration TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_plan_steps_plan ON plan_steps(plan_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_skills (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          skill_name TEXT NOT NULL,
+          description TEXT,
+          category TEXT,
+          status TEXT DEFAULT 'active',
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_skills_agent ON agent_skills(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_skills_category ON agent_skills(category);
+      `);
+
+      console.log('[Migration 018] Plans, plan_steps, and agent_skills tables created');
+    }
+  },
 ];
 
 /**
