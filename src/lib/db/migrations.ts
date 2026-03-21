@@ -994,6 +994,105 @@ const migrations: Migration[] = [
       console.log('[Migration 018] Plans, plan_steps, and agent_skills tables created');
     }
   },
+  {
+    id: '019',
+    name: 'add_bdi_state_tables',
+    up: (db) => {
+      console.log('[Migration 019] Adding BDI state tables (beliefs, desires, intentions, capabilities, memories, personas)...');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_beliefs (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          category TEXT NOT NULL,
+          belief TEXT NOT NULL,
+          value TEXT,
+          certainty REAL DEFAULT 0.5,
+          source TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_beliefs_agent ON agent_beliefs(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_desires (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          desire_type TEXT NOT NULL,
+          desire TEXT NOT NULL,
+          priority REAL DEFAULT 0.5,
+          importance TEXT,
+          serves TEXT,
+          status TEXT DEFAULT 'active',
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_desires_agent ON agent_desires(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_intentions (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          goal_ref TEXT,
+          plan_ref TEXT,
+          strategy TEXT DEFAULT 'open-minded',
+          status TEXT DEFAULT 'planning',
+          current_step TEXT,
+          progress REAL DEFAULT 0,
+          started_at TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_intentions_agent ON agent_intentions(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_capabilities (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          description TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_capabilities_agent ON agent_capabilities(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_memories (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          category TEXT,
+          content TEXT NOT NULL,
+          logged_at TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_memories_agent ON agent_memories(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_personas (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL UNIQUE,
+          role_title TEXT NOT NULL,
+          reports_to TEXT,
+          direct_reports TEXT,
+          identity TEXT,
+          behavioral_guidelines TEXT,
+          decision_authority TEXT,
+          commitment_strategy TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_personas_agent ON agent_personas(agent_id);
+      `);
+
+      console.log('[Migration 019] BDI state tables created');
+    }
+  },
 ];
 
 /**

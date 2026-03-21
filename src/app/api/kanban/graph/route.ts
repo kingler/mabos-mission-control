@@ -63,6 +63,24 @@ interface AgentSkillRow {
   agent_id: string;
 }
 
+interface DesireRow {
+  id: string;
+  agent_id: string;
+  desire_type: string;
+  desire: string;
+  priority: number;
+  status: string;
+}
+
+interface IntentionRow {
+  id: string;
+  agent_id: string;
+  goal_ref: string | null;
+  plan_ref: string | null;
+  status: string;
+  progress: number;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -223,6 +241,52 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Desire nodes — agent→desire (holds)
+    const desires = queryAll<DesireRow>(
+      'SELECT id, agent_id, desire_type, desire, priority, status FROM agent_desires WHERE business_id = ?',
+      [businessId]
+    );
+
+    for (const d of desires) {
+      if (agentFilter && d.agent_id !== agentFilter) continue;
+      nodeIds.add(d.id);
+      nodes.push({
+        id: d.id,
+        label: d.desire,
+        type: 'desire',
+        status: d.status,
+        agent: d.agent_id,
+        tier: 0.5,
+        val: 3,
+      });
+      if (nodeIds.has(d.agent_id)) {
+        links.push({ source: d.agent_id, target: d.id, relation: 'holds' });
+      }
+    }
+
+    // Intention nodes — agent→intention (pursues)
+    const intentionRows = queryAll<IntentionRow>(
+      'SELECT id, agent_id, goal_ref, plan_ref, status, progress FROM agent_intentions WHERE business_id = ?',
+      [businessId]
+    );
+
+    for (const i of intentionRows) {
+      if (agentFilter && i.agent_id !== agentFilter) continue;
+      nodeIds.add(i.id);
+      nodes.push({
+        id: i.id,
+        label: i.goal_ref || i.plan_ref || i.id,
+        type: 'intention',
+        status: i.status,
+        agent: i.agent_id,
+        tier: 1.5,
+        val: 4,
+      });
+      if (nodeIds.has(i.agent_id)) {
+        links.push({ source: i.agent_id, target: i.id, relation: 'pursues' });
+      }
+    }
+
     // Skill nodes — deduplicated by skill_name, linked to agents via possesses
     const skills = queryAll<SkillRow>(
       'SELECT DISTINCT skill_name, category, description FROM agent_skills WHERE business_id = ?',
@@ -266,6 +330,8 @@ export async function GET(request: NextRequest) {
           initiatives: nodes.filter(n => n.type === 'initiative').length,
           tasks: nodes.filter(n => n.type === 'task').length,
           skills: nodes.filter(n => n.type === 'skill').length,
+          desires: nodes.filter(n => n.type === 'desire').length,
+          intentions: nodes.filter(n => n.type === 'intention').length,
         },
       },
     });
