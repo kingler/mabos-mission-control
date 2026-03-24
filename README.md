@@ -30,6 +30,7 @@ I highly recommend getting Hetzner VPS to run this. <a href="https://hetzner.clo
   <a href="#-docker">Docker</a> •
   <a href="#-features">Features</a> •
   <a href="#-how-it-works">How It Works</a> •
+  <a href="#-kanban-board-tiers">Kanban Tiers</a> •
   <a href="#-configuration">Configuration</a> •
   <a href="#-contributors">Contributors</a>
 </p>
@@ -59,7 +60,7 @@ See the full [CHANGELOG](CHANGELOG.md) for details.
 ---
 ## ✨ Features
 
-🎯 **Task Management** — Kanban board with drag-and-drop across 7 status columns
+🎯 **Task Management** — Kanban board with drag-and-drop across 7 status columns and a 4-tier hierarchy (Goals, Campaigns, Initiatives, Tasks)
 
 🧠 **AI Planning** — Interactive Q&A flow where AI asks clarifying questions before starting work
 
@@ -249,6 +250,54 @@ Drag tasks between columns or let the system auto-advance them.
 
 ---
 
+## 🏛 Kanban Board Tiers
+
+The kanban system uses a **4-tier hierarchy** mapped to BDI (Belief-Desire-Intention) concepts. Work is decomposed from high-level goals down to concrete tasks.
+
+| Tier | Entity | BDI Mapping | Purpose |
+|:-----|:-------|:------------|:--------|
+| **1** | **Goal** | Desire | Long-term aspirations |
+| **2** | **Campaign** | Intention | Committed plans to achieve goals |
+| **3** | **Initiative** | Active plan step | Concrete work packages |
+| **4** | **Task** | Concrete action | Individual work items |
+
+### Hierarchy
+
+```
+Goal (Tier 1)
+ └─► Campaign (Tier 2)
+      └─► Initiative (Tier 3)
+           └─► Task (Tier 4)
+```
+
+Each tier has its own database table (`kanban_goals`, `kanban_campaigns`, `kanban_initiatives`, `kanban_card_meta`) and a dedicated board component for drill-down navigation.
+
+### Shared Kanban Stages
+
+All tiers share the same 6 stages:
+
+```
+BACKLOG → READY → IN PROGRESS → BLOCKED → REVIEW → DONE
+```
+
+### Properties Across Tiers
+
+- **Domain** — product, marketing, finance, operations, technology, legal, hr, strategy
+- **Meta type** — strategic, operational, tactical, exploratory
+- **Priority** — Numeric (independent of tier)
+- **WIP limits** — Enforced per tier/domain/stage combination
+
+### Supporting Infrastructure
+
+| Component | Purpose |
+|:----------|:--------|
+| **BDI Log** (`bdi_log` table) | Tracks BDI transitions per tier; goal-level events cascade through the hierarchy |
+| **Stage Transitions** (`stage_transitions` table) | Audit trail of stage changes with `entity_tier` |
+| **Graph Visualization** (`/api/kanban/graph`) | Network view with tier-based node positioning (tier 1–4) |
+| **Kanban Metrics** (`kanban_metrics` table) | Metrics filterable by tier and domain |
+
+---
+
 ## ⚙️ Configuration
 
 ### Environment Variables
@@ -338,7 +387,8 @@ mission-control/
 │   │   ├── settings/           # Settings page
 │   │   └── workspace/[slug]/   # Workspace dashboard
 │   ├── components/             # React components
-│   │   ├── MissionQueue.tsx    # Kanban board
+│   │   ├── MissionQueue.tsx    # Task kanban board
+│   │   ├── kanban/             # Tier boards (GoalBoard, CampaignBoard, InitiativeBoard)
 │   │   ├── PlanningTab.tsx     # AI planning interface
 │   │   ├── AgentsSidebar.tsx   # Agent panel
 │   │   ├── LiveFeed.tsx        # Real-time events
@@ -346,6 +396,7 @@ mission-control/
 │   └── lib/
 │       ├── db/                 # SQLite + migrations
 │       ├── openclaw/           # Gateway client + device identity
+│       ├── types/kanban.ts     # Kanban tier type definitions
 │       ├── validation.ts       # Zod schemas
 │       └── types.ts            # TypeScript types
 ├── scripts/                    # Bridge & hook scripts
