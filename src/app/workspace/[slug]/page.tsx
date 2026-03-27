@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronLeft, ListTodo, Users, Activity, Settings as SettingsIcon, ExternalLink, Home, BarChart3, Target } from 'lucide-react';
+import { ChevronLeft, ListTodo, Users, Activity, Settings as SettingsIcon, ExternalLink, Home, BarChart3, Target, Shield, Share2 } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { AgentsSidebar } from '@/components/AgentsSidebar';
 import { MissionQueue } from '@/components/MissionQueue';
@@ -285,16 +285,44 @@ export default function WorkspacePage() {
           <>
             {mobileTab === 'queue' && <MissionQueue workspaceId={workspace.id} mobileMode isPortrait />}
             {mobileTab === 'kanban' && (
-              <CenterPanel
-                activeView={activeView === 'queue' ? 'goals' : activeView}
-                workspaceId={workspace.id}
-                businessId={businessId}
-                drillDown={drillDown}
-                onDrillDown={handleDrillDown}
-                onDrillUp={handleDrillUp}
-                mobileMode
-                isPortrait
-              />
+              <div className="h-full flex flex-col">
+                <div className="flex gap-1 p-2 bg-mc-bg-secondary border-b border-mc-border overflow-x-auto shrink-0">
+                  {([
+                    { view: 'goals' as WorkspaceView, label: 'Goals', icon: <Target className="w-4 h-4" /> },
+                    { view: 'metrics' as WorkspaceView, label: 'Metrics', icon: <Activity className="w-4 h-4" /> },
+                    { view: 'monitor' as WorkspaceView, label: 'Monitor', icon: <Shield className="w-4 h-4" /> },
+                    { view: 'graph' as WorkspaceView, label: 'Graph', icon: <Share2 className="w-4 h-4" /> },
+                  ]).map(({ view, label, icon }) => {
+                    const isActive = view === 'goals'
+                      ? ['goals', 'campaigns', 'initiatives', 'delivery'].includes(activeView)
+                      : activeView === view;
+                    return (
+                      <button
+                        key={view}
+                        onClick={() => handleViewChange(view)}
+                        className={`min-h-9 flex items-center gap-1.5 px-3 rounded text-xs whitespace-nowrap ${
+                          isActive ? 'bg-mc-accent text-mc-bg font-medium' : 'text-mc-text-secondary hover:bg-mc-bg-tertiary'
+                        }`}
+                      >
+                        {icon}
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex-1 min-h-0">
+                  <CenterPanel
+                    activeView={activeView === 'queue' ? 'goals' : activeView}
+                    workspaceId={workspace.id}
+                    businessId={businessId}
+                    drillDown={drillDown}
+                    onDrillDown={handleDrillDown}
+                    onDrillUp={handleDrillUp}
+                    mobileMode
+                    isPortrait
+                  />
+                </div>
+              </div>
             )}
             {mobileTab === 'agents' && (
               <div className="h-full p-3 overflow-y-auto">
