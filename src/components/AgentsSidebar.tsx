@@ -271,82 +271,86 @@ export function AgentsSidebar({ workspaceId, mobileMode = false, isPortrait = tr
 
       {!effectiveMinimized && (
         <div className="p-3 border-t border-mc-border space-y-2">
-          {/* VIEWS Section — switches center panel */}
-          <div className="border-t border-mc-border pt-3 mb-2">
-            <div className="text-[10px] uppercase tracking-wider text-mc-text-secondary mb-2 px-1">Views</div>
-            <div className="space-y-1">
-              <button
-                onClick={() => onViewChange?.('queue')}
-                className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
-                  activeView === 'queue' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
-                }`}
-              >
-                <ListTodo className="w-4 h-4" />
-                <span>Queue</span>
-              </button>
-              <button
-                onClick={() => onViewChange?.('goals')}
-                className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
-                  activeView === 'goals' || activeView === 'campaigns' || activeView === 'initiatives' || activeView === 'delivery'
-                    ? 'bg-mc-accent/20 text-mc-accent font-medium'
-                    : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
-                }`}
-              >
-                <Target className="w-4 h-4" />
-                <span>Goals (T1)</span>
-              </button>
-              <button
-                onClick={() => onViewChange?.('metrics')}
-                className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
-                  activeView === 'metrics' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
-                }`}
-              >
-                <Activity className="w-4 h-4" />
-                <span>Metrics</span>
-              </button>
-              <button
-                onClick={() => onViewChange?.('monitor')}
-                className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
-                  activeView === 'monitor' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
-                }`}
-              >
-                <Shield className="w-4 h-4" />
-                <span>Monitor</span>
-              </button>
-              <button
-                onClick={() => onViewChange?.('graph')}
-                className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
-                  activeView === 'graph' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
-                }`}
-              >
-                <Share2 className="w-4 h-4" />
-                <span>Graph</span>
-              </button>
+          {/* VIEWS Section — switches center panel (desktop only, mobile uses Kanban sub-nav) */}
+          {!mobileMode && (
+            <div className="border-t border-mc-border pt-3 mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-mc-text-secondary mb-2 px-1">Views</div>
+              <div className="space-y-1">
+                <button
+                  onClick={() => onViewChange?.('queue')}
+                  className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
+                    activeView === 'queue' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
+                  }`}
+                >
+                  <ListTodo className="w-4 h-4" />
+                  <span>Queue</span>
+                </button>
+                <button
+                  onClick={() => onViewChange?.('goals')}
+                  className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
+                    activeView === 'goals' || activeView === 'campaigns' || activeView === 'initiatives' || activeView === 'delivery'
+                      ? 'bg-mc-accent/20 text-mc-accent font-medium'
+                      : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
+                  }`}
+                >
+                  <Target className="w-4 h-4" />
+                  <span>Goals (T1)</span>
+                </button>
+                <button
+                  onClick={() => onViewChange?.('metrics')}
+                  className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
+                    activeView === 'metrics' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
+                  }`}
+                >
+                  <Activity className="w-4 h-4" />
+                  <span>Metrics</span>
+                </button>
+                <button
+                  onClick={() => onViewChange?.('monitor')}
+                  className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
+                    activeView === 'monitor' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
+                  }`}
+                >
+                  <Shield className="w-4 h-4" />
+                  <span>Monitor</span>
+                </button>
+                <button
+                  onClick={() => onViewChange?.('graph')}
+                  className={`w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm transition-colors ${
+                    activeView === 'graph' ? 'bg-mc-accent/20 text-mc-accent font-medium' : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
+                  }`}
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>Graph</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* MABOS Section — route links for non-center-panel pages */}
-          <div className="border-t border-mc-border pt-3 mb-2">
-            <div className="text-[10px] uppercase tracking-wider text-mc-text-secondary mb-2 px-1">MABOS</div>
-            <div className="space-y-1">
-              <Link href="/mabos/agents" className="w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
-                <Brain className="w-4 h-4" />
-                <span>Agents</span>
-              </Link>
-              <Link href="/mabos/decisions" className="w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
-                <AlertTriangle className="w-4 h-4" />
-                <span>Decisions</span>
-              </Link>
-              <Link href="/mabos/cron" className="w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
-                <Clock className="w-4 h-4" />
-                <span>Cron Jobs</span>
-              </Link>
-              <Link href="/mabos/messages" className="w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
-                <MessageSquare className="w-4 h-4" />
-                <span>Messages</span>
-              </Link>
+          {/* MABOS Section — route links for non-center-panel pages (desktop only, mobile uses Settings tab) */}
+          {!mobileMode && (
+            <div className="border-t border-mc-border pt-3 mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-mc-text-secondary mb-2 px-1">MABOS</div>
+              <div className="space-y-1">
+                <Link href="/mabos/agents" className="w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
+                  <Brain className="w-4 h-4" />
+                  <span>Agents</span>
+                </Link>
+                <Link href="/mabos/decisions" className="w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Decisions</span>
+                </Link>
+                <Link href="/mabos/cron" className="w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
+                  <Clock className="w-4 h-4" />
+                  <span>Cron Jobs</span>
+                </Link>
+                <Link href="/mabos/messages" className="w-full min-h-9 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Messages</span>
+                </Link>
+              </div>
             </div>
-          </div>
+          )}
           <button
             onClick={() => setShowCreateModal(true)}
             className="w-full min-h-11 flex items-center justify-center gap-2 px-3 bg-mc-bg-tertiary hover:bg-mc-border rounded text-sm text-mc-text-secondary hover:text-mc-text transition-colors"

@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronLeft, ListTodo, Users, Activity, Settings as SettingsIcon, ExternalLink, Home, BarChart3, Target, Shield, Share2 } from 'lucide-react';
+import { ChevronLeft, ListTodo, Users, Activity, Settings as SettingsIcon, ExternalLink, Home, BarChart3, Target, Shield, Share2, Brain, AlertTriangle, Clock, MessageSquare } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { AgentsSidebar } from '@/components/AgentsSidebar';
 import { MissionQueue } from '@/components/MissionQueue';
@@ -419,6 +419,29 @@ function MobileSettingsPanel({ workspace, denseLandscape = false }: { workspace:
           <div className="text-xs text-mc-text-secondary mt-1">/{workspace.slug}</div>
         </div>
 
+
+        {/* MABOS Section */}
+        <div className="bg-mc-bg-secondary border border-mc-border rounded-lg p-4">
+          <div className="text-[10px] uppercase tracking-wider text-mc-text-secondary mb-3">MABOS</div>
+          <div className="space-y-1">
+            <Link href="/mabos/agents" className="w-full min-h-11 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
+              <Brain className="w-4 h-4" />
+              <span>Agents</span>
+            </Link>
+            <Link href="/mabos/decisions" className="w-full min-h-11 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
+              <AlertTriangle className="w-4 h-4" />
+              <span>Decisions</span>
+            </Link>
+            <Link href="/mabos/cron" className="w-full min-h-11 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
+              <Clock className="w-4 h-4" />
+              <span>Cron Jobs</span>
+            </Link>
+            <Link href="/mabos/messages" className="w-full min-h-11 flex items-center gap-2 px-3 rounded text-sm text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary transition-colors">
+              <MessageSquare className="w-4 h-4" />
+              <span>Messages</span>
+            </Link>
+          </div>
+        </div>
 
         <Link href={`/workspace/${workspace.slug}/activity`} className="w-full min-h-11 px-4 rounded-lg border border-mc-border bg-mc-bg-secondary flex items-center justify-between text-sm">
           <span className="flex items-center gap-2">
