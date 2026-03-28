@@ -30,6 +30,8 @@ I highly recommend getting Hetzner VPS to run this. <a href="https://hetzner.clo
   <a href="#-docker">Docker</a> •
   <a href="#-features">Features</a> •
   <a href="#-how-it-works">How It Works</a> •
+  <a href="#-kanban-board-tiers">Kanban Tiers</a> •
+  <a href="#-agent-autonomy--bdi-workflow">Agent Autonomy</a> •
   <a href="#-configuration">Configuration</a> •
   <a href="#-contributors">Contributors</a>
 </p>
@@ -59,7 +61,7 @@ See the full [CHANGELOG](CHANGELOG.md) for details.
 ---
 ## ✨ Features
 
-🎯 **Task Management** — Kanban board with drag-and-drop across 7 status columns
+🎯 **Task Management** — Kanban board with drag-and-drop across 7 status columns and a 4-tier hierarchy (Goals, Campaigns, Initiatives, Tasks)
 
 🧠 **AI Planning** — Interactive Q&A flow where AI asks clarifying questions before starting work
 
@@ -249,6 +251,164 @@ Drag tasks between columns or let the system auto-advance them.
 
 ---
 
+## 🏛 Kanban Board Tiers
+
+The kanban system uses a **4-tier hierarchy** mapped to BDI (Belief-Desire-Intention) concepts. Work is decomposed from high-level goals down to concrete tasks.
+
+| Tier | Entity | BDI Mapping | Purpose |
+|:-----|:-------|:------------|:--------|
+| **1** | **Goal** | Desire | Long-term aspirations |
+| **2** | **Campaign** | Intention | Committed plans to achieve goals |
+| **3** | **Initiative** | Active plan step | Concrete work packages |
+| **4** | **Task** | Concrete action | Individual work items |
+
+### Hierarchy
+
+```
+Goal (Tier 1)
+ └─► Campaign (Tier 2)
+      └─► Initiative (Tier 3)
+           └─► Task (Tier 4)
+```
+
+Each tier has its own database table (`kanban_goals`, `kanban_campaigns`, `kanban_initiatives`, `kanban_card_meta`) and a dedicated board component for drill-down navigation.
+
+### Shared Kanban Stages
+
+All tiers share the same 6 stages:
+
+```
+BACKLOG → READY → IN PROGRESS → BLOCKED → REVIEW → DONE
+```
+
+### Properties Across Tiers
+
+- **Domain** — product, marketing, finance, operations, technology, legal, hr, strategy
+- **Meta type** — strategic, operational, tactical, exploratory
+- **Priority** — Numeric (independent of tier)
+- **WIP limits** — Enforced per tier/domain/stage combination
+
+### Supporting Infrastructure
+
+| Component | Purpose |
+|:----------|:--------|
+| **BDI Log** (`bdi_log` table) | Tracks BDI transitions per tier; goal-level events cascade through the hierarchy |
+| **Stage Transitions** (`stage_transitions` table) | Audit trail of stage changes with `entity_tier` |
+| **Graph Visualization** (`/api/kanban/graph`) | Network view with tier-based node positioning (tier 1–4) |
+| **Kanban Metrics** (`kanban_metrics` table) | Metrics filterable by tier and domain |
+
+---
+
+## 🤖 Agent Autonomy & BDI Workflow
+
+Agents don't just receive tasks — they autonomously decompose goals, delegate work, learn from failures, and adapt. This is driven by a **BDI (Belief-Desire-Intention) state machine** that maps directly to the kanban tier hierarchy.
+
+### BDI State Transitions
+
+Each transition in the BDI cycle creates a tier-level entity and advances work automatically:
+
+```
+ BDI State       Transition              Tier Created     Stage Effect
+─────────────────────────────────────────────────────────────────────────
+ Desire      →   desire_adopted      →   Goal            backlog
+ Intention   →   intention_committed →   Campaign        backlog → in_progress (auto)
+ Intention   →   plan_selected       →   Initiative      backlog → in_progress (auto)
+ Action      →   action_executed     →   Task            inbox / assigned
+ Belief      →   belief_revised      →   —               stage update
+ —           →   goal_achieved       →   —               → done (cascade)
+ —           →   goal_dropped        →   —               → cancelled (cascade)
+```
+
+When an agent commits an intention or executes an action, entities in `backlog` auto-transition to `in_progress` — no human intervention needed.
+
+### Goal Decomposition
+
+Agents break down high-level goals into executable work through the `/api/kanban/tasks/decompose` endpoint:
+
+```
+  CEO creates Goal: "Launch Q3 product line"
+   │
+   ├─► CMO commits Campaign: "Q3 marketing push"
+   │    └─► Creative Director selects Initiative: "Brand assets"
+   │         ├─► Task: "Design landing page"  → assigned to Builder
+   │         └─► Task: "Create ad creatives"  → assigned to Builder
+   │
+   └─► CTO commits Campaign: "Platform readiness"
+        └─► Product Manager selects Initiative: "Feature rollout"
+             ├─► Task: "Implement checkout flow" → assigned to Builder
+             └─► Task: "Write integration tests" → assigned to Tester
+```
+
+Each step is a BDI declaration logged in `bdi_log` with the agent, tier, and transition type.
+
+### Agent-to-Agent Delegation
+
+Agents delegate tasks to other agents via `/api/kanban/tasks/delegate`:
+
+- Updates task assignment to the target agent
+- Logs an `intention_committed` BDI entry
+- Sends delegation instructions as an `agent_message` event
+- Broadcasts `task_updated` via SSE for real-time UI updates
+
+### Workflow Engine & Auto-Dispatch
+
+The workflow engine (`src/lib/workflow-engine.ts`) orchestrates task execution across stages:
+
+1. **Role matching** — When a task enters a new stage, the engine matches the stage's required role to an available agent (via `task_roles` or fallback to `assigned_agent_id`)
+2. **Auto-dispatch** — The matched agent is assigned and dispatched via OpenClaw Gateway
+3. **Fail-loopback** — If testing or review fails, the task routes back to the builder stage via `fail_targets`
+4. **Queue draining** — Tasks waiting in queue stages auto-advance when the next stage is free
+
+### Failure Escalation
+
+When a task fails the same stage **2 or more times**, the system escalates (`src/lib/task-governance.ts`):
+
+1. A **Fixer agent** is auto-created (if one doesn't exist)
+2. The task is reassigned to the Fixer
+3. The escalation is logged in `task_roles`
+4. Previous failure context is included in the dispatch
+
+### Learner Agent & Knowledge Base
+
+A dedicated **Learner agent** observes all stage transitions (`src/lib/learner.ts`):
+
+- Notified on every task success or failure
+- Receives full context: task details, transition, failure reason
+- Writes lessons learned to the workspace knowledge base via `/api/workspaces/{id}/knowledge`
+- Knowledge entries include title, category, and confidence score
+
+On future dispatches, the top 5 most relevant knowledge entries are **injected into the builder's context** — preventing repeated mistakes.
+
+### MABOS Sync Engine
+
+The MABOS integration (`src/lib/mabos/sync-engine.ts`) keeps the BDI system in sync:
+
+- **Agent sync** — Syncs BDI metadata counts (beliefs, goals, intentions, desires) and autonomy levels
+- **Goal sync** — Imports MABOS goals into `kanban_goals`, mapping priorities and domains
+- **Task sync** — Bidirectional sync between Mission Control and MABOS
+- **Progress rollup** — Recalculates progress percentages up the hierarchy (tasks → initiatives → campaigns → goals)
+- **BDI cycle trigger** — `/api/mabos/agents/{id}/bdi` triggers a full BDI reasoning cycle for an agent, returning updated beliefs/desires/intentions/actions
+
+### Pre-Configured Agent Roles
+
+The system bootstraps with **4 core workflow agents** (`src/lib/bootstrap-agents.ts`):
+
+| Agent | Role | Responsibility |
+|:------|:-----|:---------------|
+| **Builder** | `builder` | Creates deliverables, handles fail-loopback rework |
+| **Tester** | `tester` | Front-end QA — tests UI, rendering, interactions |
+| **Reviewer** | `reviewer` | Code quality — reviews completeness, correctness, security |
+| **Learner** | `learner` | Observes all transitions, captures lessons to knowledge base |
+
+Additionally, 20+ **executive and operational agents** (CEO, CFO, CTO, CMO, Product Manager, etc.) are defined in `mabos/agents/` with full BDI profiles:
+
+- `Beliefs.md` — What the agent knows about the business and environment
+- `Desires.md` — Terminal, instrumental, and learning desires
+- `Intentions.md` — Active, planned, completed, and expired intentions
+- `Goals.md` — Strategic, tactical, operational, and delegated goals
+
+---
+
 ## ⚙️ Configuration
 
 ### Environment Variables
@@ -338,7 +498,8 @@ mission-control/
 │   │   ├── settings/           # Settings page
 │   │   └── workspace/[slug]/   # Workspace dashboard
 │   ├── components/             # React components
-│   │   ├── MissionQueue.tsx    # Kanban board
+│   │   ├── MissionQueue.tsx    # Task kanban board
+│   │   ├── kanban/             # Tier boards (GoalBoard, CampaignBoard, InitiativeBoard)
 │   │   ├── PlanningTab.tsx     # AI planning interface
 │   │   ├── AgentsSidebar.tsx   # Agent panel
 │   │   ├── LiveFeed.tsx        # Real-time events
@@ -346,6 +507,7 @@ mission-control/
 │   └── lib/
 │       ├── db/                 # SQLite + migrations
 │       ├── openclaw/           # Gateway client + device identity
+│       ├── types/kanban.ts     # Kanban tier type definitions
 │       ├── validation.ts       # Zod schemas
 │       └── types.ts            # TypeScript types
 ├── scripts/                    # Bridge & hook scripts
