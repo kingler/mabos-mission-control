@@ -7,7 +7,7 @@ import type { Workspace } from '@/lib/types';
 
 export default function WorkspaceActivityPage() {
   const params = useParams();
-  const slug = params.slug as string;
+  const slug = params?.slug as string;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
 
   useEffect(() => {

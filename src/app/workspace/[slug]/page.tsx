@@ -20,7 +20,7 @@ type MobileTab = 'queue' | 'agents' | 'feed' | 'settings' | 'kanban';
 
 export default function WorkspacePage() {
   const params = useParams();
-  const slug = params.slug as string;
+  const slug = params?.slug as string;
 
   const { setAgents, setTasks, setEvents, setIsOnline, setIsLoading, isLoading } = useMissionControl();
 
