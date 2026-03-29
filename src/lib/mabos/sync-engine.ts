@@ -11,6 +11,8 @@ import type Database from 'better-sqlite3';
 import type { MabosApiClient } from './client';
 import type { SyncReport, MabosTask, MabosCronJob, AgentCognitiveActivity } from './types';
 import { v4 as uuid } from 'uuid';
+import { getTypeDBClient, MCGoalQueries, MCFactQueries, parseAnswers, extractVar, extractNum, TypeDBUnavailableError } from '@/lib/typedb';
+import { writeKnowledgeToTypeDB, syncKnowledgeFromTypeDB, factToKnowledgeEntry } from '@/lib/typedb';
 
 // Status mapping: MC → MABOS
 const MC_TO_MABOS_STATUS: Record<string, string> = {
@@ -86,8 +88,12 @@ export class MabosSyncEngine {
       report.agents.errors++;
     }
 
+    // Goals: TypeDB-first, fall back to MABOS API
     try {
-      await this.syncGoals(report);
+      const syncedFromTypeDB = await this.syncGoalsFromTypeDB(report);
+      if (!syncedFromTypeDB) {
+        await this.syncGoals(report);
+      }
     } catch (err) {
       console.error('[MabosSync] Goal sync failed:', err);
       report.goals.errors++;
@@ -125,6 +131,13 @@ export class MabosSyncEngine {
       await this.syncActivities();
     } catch (err) {
       console.error('[MabosSync] Activities sync failed:', err);
+    }
+
+    // Knowledge: push un-synced entries to TypeDB, pull newer facts back
+    try {
+      await this.syncKnowledge();
+    } catch (err) {
+      console.error('[MabosSync] Knowledge sync failed:', err);
     }
 
     // Rollup progress after all syncs complete
@@ -276,6 +289,128 @@ export class MabosSyncEngine {
 
     this.updateSyncState('goals', 'success');
     console.log(`[MabosSync] Goals synced: ${goalModel.goals.length} total`);
+  }
+
+  /**
+   * Sync goals from TypeDB (primary source).
+   * Returns true if TypeDB was available and goals were synced.
+   */
+  async syncGoalsFromTypeDB(report?: SyncReport): Promise<boolean> {
+    const client = getTypeDBClient();
+    if (!client.isAvailable()) {
+      const connected = await client.connect();
+      if (!connected) return false;
+    }
+
+    try {
+      const result = await client.matchQuery(MCGoalQueries.fetchGoals());
+      if (!result) return false;
+
+      const answers = parseAnswers(result);
+      if (answers.length === 0) return false;
+
+      const now = new Date().toISOString();
+      const upsert = this.db.prepare(`
+        INSERT INTO kanban_goals (id, business_id, title, description, meta_type, domain, stage, owner_id, priority, tags, created_at, updated_at)
+        VALUES (@id, @businessId, @title, @description, @metaType, @domain, @stage, @ownerId, @priority, @tags, @now, @now)
+        ON CONFLICT(id) DO UPDATE SET
+          title = @title, description = @description, meta_type = @metaType,
+          domain = @domain, owner_id = @ownerId, priority = @priority, tags = @tags,
+          updated_at = @now
+      `);
+      const findGoal = this.db.prepare('SELECT id, stage FROM kanban_goals WHERE id = ?');
+
+      for (const answer of answers) {
+        try {
+          const uid = extractVar(answer.data, 'uid');
+          const name = extractVar(answer.data, 'name');
+          const desc = extractVar(answer.data, 'desc');
+          const hl = extractVar(answer.data, 'hl');
+          const priority = extractNum(answer.data, 'priority');
+          const agentUid = extractVar(answer.data, 'agent_uid');
+
+          const domain = ACTOR_TO_DOMAIN[agentUid.replace('vw-', '')] || 'strategy';
+          const metaType = hl || 'strategic';
+          const ownerId = agentUid ? `mabos-${agentUid.replace('vw-', '')}` : null;
+          const kanbanPriority = mapGoalPriority(priority);
+
+          const existing = findGoal.get(uid) as { id: string; stage: string } | undefined;
+
+          upsert.run({
+            id: uid,
+            businessId: this.businessId,
+            title: name,
+            description: desc || '',
+            metaType,
+            domain,
+            stage: existing?.stage || 'backlog',
+            ownerId,
+            priority: kanbanPriority,
+            tags: JSON.stringify({ level: hl, actor: agentUid, source: 'typedb' }),
+            now,
+          });
+
+          if (report) { if (existing) report.goals.updated++; else report.goals.inserted++; }
+        } catch (err) {
+          console.error('[MabosSync] TypeDB goal sync error:', err);
+          if (report) report.goals.errors++;
+        }
+      }
+
+      this.updateSyncState('goals_typedb', 'success');
+      console.log(`[MabosSync] Goals synced from TypeDB: ${answers.length} total`);
+      return true;
+    } catch (err) {
+      if (err instanceof TypeDBUnavailableError) return false;
+      throw err;
+    }
+  }
+
+  /**
+   * Bidirectional knowledge sync with TypeDB.
+   * 1. Push un-synced knowledge_entries to TypeDB as SPO facts
+   * 2. Pull newer TypeDB facts back to SQLite
+   */
+  async syncKnowledge(): Promise<void> {
+    const client = getTypeDBClient();
+    if (!client.isAvailable()) return;
+
+    const now = new Date().toISOString();
+
+    // 1. Push un-synced knowledge entries to TypeDB
+    try {
+      const unsyncedEntries = this.db.prepare(
+        'SELECT * FROM knowledge_entries WHERE typedb_synced_at IS NULL LIMIT 100'
+      ).all() as Array<Record<string, unknown>>;
+
+      for (const entry of unsyncedEntries) {
+        try {
+          await writeKnowledgeToTypeDB({
+            id: entry.id as string,
+            workspace_id: entry.workspace_id as string,
+            category: entry.category as string,
+            title: entry.title as string,
+            content: entry.content as string,
+            confidence: (entry.confidence as number) || 0.5,
+            created_by_agent_id: entry.created_by_agent_id as string | null,
+          });
+
+          this.db.prepare(
+            'UPDATE knowledge_entries SET typedb_synced_at = ? WHERE id = ?'
+          ).run(now, entry.id);
+        } catch (err) {
+          console.warn(`[MabosSync] Knowledge push failed for ${entry.id}:`, err);
+        }
+      }
+
+      if (unsyncedEntries.length > 0) {
+        console.log(`[MabosSync] Pushed ${unsyncedEntries.length} knowledge entries to TypeDB`);
+      }
+    } catch (err) {
+      console.warn('[MabosSync] Knowledge push phase failed:', err);
+    }
+
+    this.updateSyncState('knowledge', 'success');
   }
 
   /**

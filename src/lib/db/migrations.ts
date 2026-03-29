@@ -1168,6 +1168,18 @@ const migrations: Migration[] = [
       console.log('[Migration 021] business_profiles table created');
     }
   },
+  {
+    id: '022',
+    name: 'add_knowledge_typedb_synced_at',
+    up: (db) => {
+      console.log('[Migration 022] Adding typedb_synced_at to knowledge_entries...');
+      const cols = db.pragma('table_info(knowledge_entries)') as { name: string }[];
+      if (!cols.some(c => c.name === 'typedb_synced_at')) {
+        db.exec('ALTER TABLE knowledge_entries ADD COLUMN typedb_synced_at TEXT');
+        console.log('[Migration 022] Added typedb_synced_at column');
+      }
+    }
+  },
 ];
 
 /**

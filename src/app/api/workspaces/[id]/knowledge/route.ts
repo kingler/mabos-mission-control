@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryAll, run } from '@/lib/db';
+import { writeKnowledgeToTypeDB } from '@/lib/typedb';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 /**
  * GET /api/workspaces/[id]/knowledge
@@ -80,6 +82,13 @@ export async function POST(
         created_by_agent_id || null
       ]
     );
+
+    // Fire-and-forget write-through to TypeDB
+    writeKnowledgeToTypeDB({
+      id, workspace_id: workspaceId, category, title, content,
+      confidence: confidence ?? 0.5,
+      created_by_agent_id: created_by_agent_id || null,
+    }).catch(err => console.warn('[Knowledge] TypeDB write-through failed:', err.message));
 
     return NextResponse.json({ id, message: 'Knowledge entry created' }, { status: 201 });
   } catch (error) {
