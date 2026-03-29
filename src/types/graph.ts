@@ -27,5 +27,8 @@ export interface GraphFilters {
   showTasks: boolean;
   showCampaigns: boolean;
   showInitiatives: boolean;
+  showSkills: boolean;
+  showDesires: boolean;
+  showIntentions: boolean;
   selectedAgent: string | null;
 }
