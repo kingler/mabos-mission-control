@@ -85,6 +85,7 @@ export interface Task {
   mabos_plan_name?: string;
   depends_on?: string;
   estimated_duration?: string;
+  decomposition_run_id?: string;
   sync_status?: string;
   synced_at?: string;
   created_at: string;
@@ -256,6 +257,34 @@ export interface TaskDeliverable {
   created_at: string;
 }
 
+// Decomposition Pipeline types
+export type DecompositionStageStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+export type DecompositionStageName =
+  | 'business_goal_generation'
+  | 'goal_refinement'
+  | 'project_scoping'
+  | 'plan_generation'
+  | 'task_decomposition'
+  | 'subtask_action_generation'
+  | 'execution_plan_assembly';
+
+export interface DecompositionStage {
+  id: string;
+  goal_id: string;
+  pipeline_run_id: string;
+  stage_number: number;
+  stage_name: DecompositionStageName;
+  status: DecompositionStageStatus;
+  agent_id?: string;
+  input_json?: string;
+  output_json?: string;
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+}
+
 // Planning types
 export type PlanningQuestionType = 'multiple_choice' | 'text' | 'yes_no';
 
@@ -389,7 +418,9 @@ export type SSEEventType =
   | 'mabos:sync_complete'
   | 'mabos:task_created'
   | 'mabos:decision_pending'
-  | 'mabos:activity';
+  | 'mabos:activity'
+  | 'decomposition_stage_updated'
+  | 'pipeline:stage_update';
 
 export interface SSEEvent {
   type: SSEEventType;
@@ -401,5 +432,11 @@ export interface SSEEvent {
     deleted?: boolean;
   } | {
     id: string;  // For task_deleted events
+  } | {
+    stageNumber: number;
+    stageName: string;
+    status: string;
+    resultSummary?: string;
+    error?: string;
   };
 }

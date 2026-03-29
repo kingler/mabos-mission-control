@@ -51,6 +51,16 @@ export async function GET(
       }
     }
 
+    // Fetch kanban hierarchy context (goal_id, campaign_id, initiative_id, decomposition_run_id)
+    const cardMeta = getDb().prepare(`
+      SELECT goal_id, campaign_id, initiative_id
+      FROM kanban_card_meta WHERE task_id = ?
+    `).get(taskId) as { goal_id?: string; campaign_id?: string; initiative_id?: string } | undefined;
+
+    // Get decomposition_run_id from task itself
+    const taskFull = getDb().prepare('SELECT decomposition_run_id FROM tasks WHERE id = ?')
+      .get(taskId) as { decomposition_run_id?: string } | undefined;
+
     return NextResponse.json({
       taskId,
       sessionKey: task.planning_session_key,
@@ -60,6 +70,10 @@ export async function GET(
       spec: task.planning_spec ? JSON.parse(task.planning_spec) : null,
       agents: task.planning_agents ? JSON.parse(task.planning_agents) : null,
       isStarted: messages.length > 0,
+      goal_id: cardMeta?.goal_id || null,
+      campaign_id: cardMeta?.campaign_id || null,
+      initiative_id: cardMeta?.initiative_id || null,
+      decomposition_run_id: taskFull?.decomposition_run_id || null,
     });
   } catch (error) {
     console.error('Failed to get planning state:', error);

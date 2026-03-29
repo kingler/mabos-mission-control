@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { X, Save, Trash2, Activity, Package, Bot, ClipboardList, Plus, Users, ImageIcon } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
 import { triggerAutoDispatch, shouldTriggerAutoDispatch } from '@/lib/auto-dispatch';
@@ -42,6 +42,29 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
     assigned_agent_id: task?.assigned_agent_id || '',
     due_date: task?.due_date || '',
   });
+
+  // Auto-populate description from Stage 5 if empty and task has a pipeline run
+  useEffect(() => {
+    if (task && !task.description && task.decomposition_run_id) {
+      (async () => {
+        try {
+          const res = await fetch(`/api/kanban/decomposition/${task.decomposition_run_id}`);
+          if (res.ok) {
+            const data = await res.json();
+            const stage5 = data.stages?.find((s: any) => s.stage_number === 5 && s.status === 'completed');
+            if (stage5?.output_json) {
+              const output = JSON.parse(stage5.output_json);
+              const allTasks = output.tasks_by_initiative?.flatMap((ti: any) => ti.tasks || []) || [];
+              const match = allTasks.find((t: any) => t.title === task.title);
+              if (match?.description) {
+                setForm(prev => ({ ...prev, description: match.description }));
+              }
+            }
+          }
+        } catch { /* optional auto-populate */ }
+      })();
+    }
+  }, [task]);
 
   const resolveStatus = (): TaskStatus => {
     // Planning mode overrides everything

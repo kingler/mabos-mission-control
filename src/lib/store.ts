@@ -5,6 +5,71 @@ import { debug } from './debug';
 import type { Agent, Task, Conversation, Message, Event, TaskStatus, OpenClawSession } from './types';
 import type { AgentCognitiveActivity, ActivityCategory } from './mabos/types';
 
+// ─── Onboarding Types ──────────────────────────────────────────────
+
+export interface DecompositionStage {
+  stageNumber: number;
+  stageName: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  resultSummary?: string;
+  error?: string;
+}
+
+export interface OnboardingState {
+  step: number;
+  businessName: string;
+  businessType: string;
+  industry: string;
+  description: string;
+  companyStage: string;
+  currentRevenue: string;
+  teamSize: number;
+  keyProducts: string;
+  primaryChannels: string;
+  constraints: string;
+  vision: string;
+  mission: string;
+  coreValues: string[];
+  bmc: Record<string, string>;
+  pipelineRunId: string | null;
+  pipelineStages: DecompositionStage[];
+  isGenerating: boolean;
+  workspaceId: string | null;
+  workspaceSlug: string | null;
+}
+
+export interface OnboardingActions {
+  setStep: (step: number) => void;
+  updateField: (field: keyof OnboardingState, value: unknown) => void;
+  setBmc: (blockKey: string, value: string) => void;
+  setPipelineStages: (stages: DecompositionStage[]) => void;
+  updatePipelineStage: (stageNumber: number, update: Partial<DecompositionStage>) => void;
+  resetOnboarding: () => void;
+}
+
+const initialOnboarding: OnboardingState = {
+  step: 1,
+  businessName: '',
+  businessType: '',
+  industry: '',
+  description: '',
+  companyStage: 'startup',
+  currentRevenue: '',
+  teamSize: 1,
+  keyProducts: '',
+  primaryChannels: '',
+  constraints: '',
+  vision: '',
+  mission: '',
+  coreValues: [],
+  bmc: {},
+  pipelineRunId: null,
+  pipelineStages: [],
+  isGenerating: false,
+  workspaceId: null,
+  workspaceSlug: null,
+};
+
 interface MissionControlState {
   // Data
   agents: Agent[];
@@ -63,6 +128,10 @@ interface MissionControlState {
   setAgentOpenClawSession: (agentId: string, session: OpenClawSession | null) => void;
   setOpenclawMessages: (messages: Message[]) => void;
   addOpenclawMessage: (message: Message) => void;
+
+  // Onboarding
+  onboarding: OnboardingState;
+  onboardingActions: OnboardingActions;
 }
 
 export const useMissionControl = create<MissionControlState>((set) => ({
@@ -177,4 +246,28 @@ export const useMissionControl = create<MissionControlState>((set) => ({
   setOpenclawMessages: (messages) => set({ openclawMessages: messages }),
   addOpenclawMessage: (message) =>
     set((state) => ({ openclawMessages: [...state.openclawMessages, message] })),
+
+  // Onboarding
+  onboarding: { ...initialOnboarding },
+  onboardingActions: {
+    setStep: (step) => set((state) => ({ onboarding: { ...state.onboarding, step } })),
+    updateField: (field, value) => set((state) => ({
+      onboarding: { ...state.onboarding, [field]: value },
+    })),
+    setBmc: (blockKey, value) => set((state) => ({
+      onboarding: { ...state.onboarding, bmc: { ...state.onboarding.bmc, [blockKey]: value } },
+    })),
+    setPipelineStages: (stages) => set((state) => ({
+      onboarding: { ...state.onboarding, pipelineStages: stages },
+    })),
+    updatePipelineStage: (stageNumber, update) => set((state) => ({
+      onboarding: {
+        ...state.onboarding,
+        pipelineStages: state.onboarding.pipelineStages.map((s) =>
+          s.stageNumber === stageNumber ? { ...s, ...update } : s
+        ),
+      },
+    })),
+    resetOnboarding: () => set({ onboarding: { ...initialOnboarding } }),
+  },
 }));

@@ -17,6 +17,13 @@ interface RoleAssignment {
   agent_emoji?: string;
 }
 
+interface PipelineTeamMember {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  responsibilities?: string[];
+}
+
 export function TeamTab({ taskId, workspaceId }: TeamTabProps) {
   const { agents } = useMissionControl();
   const [roles, setRoles] = useState<RoleAssignment[]>([]);
@@ -26,6 +33,7 @@ export function TeamTab({ taskId, workspaceId }: TeamTabProps) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pipelineTeam, setPipelineTeam] = useState<PipelineTeamMember[]>([]);
 
   // Load existing roles and workflows
   useEffect(() => {
@@ -55,6 +63,22 @@ export function TeamTab({ taskId, workspaceId }: TeamTabProps) {
         if (taskRes.ok) {
           const task = await taskRes.json();
           setSelectedWorkflow(task.workflow_template_id || '');
+
+          // Fetch pipeline team from decomposition Stage 3 if task has a pipeline run
+          if (task.decomposition_run_id) {
+            try {
+              const pipelineRes = await fetch(`/api/kanban/decomposition/${task.decomposition_run_id}`);
+              if (pipelineRes.ok) {
+                const pipelineData = await pipelineRes.json();
+                const stage3 = pipelineData.stages?.find((s: any) => s.stage_number === 3 && s.status === 'completed');
+                if (stage3?.output_json) {
+                  const output = JSON.parse(stage3.output_json);
+                  const team = output.campaigns?.flatMap((c: any) => c.agent_team || []) || [];
+                  setPipelineTeam(team);
+                }
+              }
+            } catch { /* Pipeline team fetch is optional */ }
+          }
         }
       } catch (err) {
         console.error('Failed to load team data:', err);
@@ -163,6 +187,30 @@ export function TeamTab({ taskId, workspaceId }: TeamTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Pipeline Team Assignments (from decomposition Stage 3) */}
+      {pipelineTeam.length > 0 && (
+        <div>
+          <label className="block text-sm font-medium mb-2">Pipeline Team Assignments</label>
+          <div className="bg-mc-bg border border-mc-border rounded-lg p-3 space-y-2">
+            {pipelineTeam.map((member, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className={`text-xs px-2 py-0.5 rounded ${
+                  member.role === 'lead' ? 'bg-mc-accent/20 text-mc-accent' : 'bg-mc-bg-tertiary text-mc-text-secondary'
+                }`}>
+                  {member.role}
+                </span>
+                <span className="text-sm">{member.agent_name || member.agent_id}</span>
+                {member.responsibilities && member.responsibilities.length > 0 && (
+                  <span className="text-xs text-mc-text-secondary">
+                    ({member.responsibilities.join(', ')})
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Workflow Template Selector */}
       <div>
         <label className="block text-sm font-medium mb-2">Workflow Template</label>

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { broadcast } from '@/lib/events';
 import { v4 as uuidv4 } from 'uuid';
+import { generateTaskDescription } from '@/lib/kanban/templates';
+import type { KanbanDomain } from '@/lib/types/kanban';
 
 interface ProposedTask {
   title: string;
@@ -19,13 +21,14 @@ interface DecomposeBody {
   agentId: string;
   analysis?: string;
   proposedTasks: ProposedTask[];
+  pipelineRunId?: string;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const db = getDb();
     const body: DecomposeBody = await request.json();
-    const { goalId, campaignId, initiativeId, agentId, analysis, proposedTasks } = body;
+    const { goalId, campaignId, initiativeId, agentId, analysis, proposedTasks, pipelineRunId } = body;
 
     if (!goalId || !agentId || !proposedTasks?.length) {
       return NextResponse.json(
@@ -38,8 +41,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Maximum 50 tasks per decomposition' }, { status: 400 });
     }
 
-    const goal = db.prepare('SELECT id, business_id, domain FROM kanban_goals WHERE id = ?')
-      .get(goalId) as { id: string; business_id: string; domain: string } | undefined;
+    const goal = db.prepare('SELECT id, title, business_id, domain FROM kanban_goals WHERE id = ?')
+      .get(goalId) as { id: string; title: string; business_id: string; domain: string } | undefined;
     if (!goal) {
       return NextResponse.json({ error: `Goal ${goalId} not found` }, { status: 404 });
     }
@@ -55,20 +58,37 @@ export async function POST(request: NextRequest) {
         taskIds.push(taskId);
         const initialStatus = pt.assignedAgentId ? 'assigned' : 'inbox';
 
+        // Auto-generate description from templates if not provided and pipeline run exists
+        const description = pt.description || (pipelineRunId
+          ? generateTaskDescription(pt.title, goal.title, goal.domain as KanbanDomain)
+          : null);
+
         db.prepare(`
           INSERT INTO tasks (id, title, description, status, priority, assigned_agent_id, created_by_agent_id,
-            workspace_id, business_id, origin, estimated_duration, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'default', ?, 'mabos-agent', ?, ?, ?)
+            workspace_id, business_id, origin, estimated_duration, decomposition_run_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'default', ?, 'mabos-agent', ?, ?, ?, ?)
         `).run(
-          taskId, pt.title, pt.description || null, initialStatus,
+          taskId, pt.title, description, initialStatus,
           pt.priority || 'normal', pt.assignedAgentId || null, agentId,
-          goal.business_id, pt.estimatedDuration || null, now, now
+          goal.business_id, pt.estimatedDuration || null, pipelineRunId || null, now, now
         );
 
         db.prepare(`
           INSERT INTO kanban_card_meta (task_id, goal_id, campaign_id, initiative_id, meta_type, domain)
           VALUES (?, ?, ?, ?, 'operational', ?)
         `).run(taskId, goalId, campaignId || null, initiativeId || null, goal.domain);
+
+        // Pipeline-enhanced: mark planning complete and log creation activity
+        if (pipelineRunId) {
+          db.prepare(`UPDATE tasks SET planning_complete = 1 WHERE id = ?`).run(taskId);
+          db.prepare(`
+            INSERT INTO task_activities (id, task_id, activity_type, message, created_at)
+            VALUES (?, ?, 'status_changed', ?, ?)
+          `).run(
+            `act-${uuidv4().slice(0, 8)}`, taskId,
+            `Task created from decomposition pipeline run ${pipelineRunId}`, now
+          );
+        }
 
         createdTasks.push({ taskId, title: pt.title, index: i });
       }

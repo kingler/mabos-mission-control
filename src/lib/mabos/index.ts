@@ -9,6 +9,7 @@ import { MabosSyncEngine } from './sync-engine';
 import { MabosEventBridge } from './event-bridge';
 import { getOpenClawClient } from '../openclaw/client';
 import { broadcast } from '../events';
+import { getScheduler } from '../scheduler';
 import type { MabosSSEEvent, SyncReport } from './types';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -81,11 +82,24 @@ export function getMabosIntegration(db: Database.Database): MabosIntegration {
     getBusinessId: () => businessId,
   };
 
+  // Start auto-dispatch scheduler after initial sync
+  const scheduler = getScheduler();
+  if (!scheduler.getStatus().running) {
+    console.log('[MABOS] Starting auto-dispatch scheduler...');
+    scheduler.start();
+  }
+
   console.log(`[MABOS] Integration initialized (businessId: ${businessId})`);
   return instance;
 }
 
 export function destroyMabosIntegration(): void {
+  // Stop scheduler
+  const scheduler = getScheduler();
+  if (scheduler.getStatus().running) {
+    scheduler.stop();
+  }
+
   if (syncTimer) {
     clearInterval(syncTimer);
     syncTimer = null;

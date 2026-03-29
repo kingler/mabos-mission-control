@@ -457,4 +457,27 @@ CREATE TABLE IF NOT EXISTS agent_activities (
 );
 CREATE INDEX IF NOT EXISTS idx_activities_agent ON agent_activities(agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activities_category ON agent_activities(category, created_at DESC);
+
+-- Business profiles (onboarding data per workspace)
+CREATE TABLE IF NOT EXISTS business_profiles (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id),
+  business_type TEXT NOT NULL,
+  industry TEXT NOT NULL,
+  description TEXT NOT NULL,
+  company_stage TEXT DEFAULT 'startup',
+  current_revenue TEXT,
+  team_size INTEGER DEFAULT 1,
+  key_products TEXT,
+  primary_channels TEXT,
+  constraints TEXT,
+  vision TEXT,
+  mission TEXT,
+  core_values TEXT,
+  bmc_data TEXT,
+  onboarding_completed_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_business_profiles_workspace ON business_profiles(workspace_id);
 `;

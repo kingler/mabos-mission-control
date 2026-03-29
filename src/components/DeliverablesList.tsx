@@ -14,8 +14,15 @@ interface DeliverablesListProps {
   taskId: string;
 }
 
+interface ExpectedDeliverable {
+  title: string;
+  description: string;
+  type?: string;
+}
+
 export function DeliverablesList({ taskId }: DeliverablesListProps) {
   const [deliverables, setDeliverables] = useState<TaskDeliverable[]>([]);
+  const [expectedDeliverables, setExpectedDeliverables] = useState<ExpectedDeliverable[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadDeliverables = useCallback(async () => {
@@ -24,6 +31,24 @@ export function DeliverablesList({ taskId }: DeliverablesListProps) {
       if (res.ok) {
         const data = await res.json();
         setDeliverables(data);
+      }
+
+      // Fetch expected deliverables from Stage 6 if task has a pipeline run
+      const taskRes = await fetch(`/api/tasks/${taskId}`);
+      if (taskRes.ok) {
+        const task = await taskRes.json();
+        if (task.decomposition_run_id) {
+          const pipelineRes = await fetch(`/api/kanban/decomposition/${task.decomposition_run_id}`);
+          if (pipelineRes.ok) {
+            const pipelineData = await pipelineRes.json();
+            const stage6 = pipelineData.stages?.find((s: any) => s.stage_number === 6 && s.status === 'completed');
+            if (stage6?.output_json) {
+              const output = JSON.parse(stage6.output_json);
+              const expected = output.actions_by_task?.flatMap((at: any) => at.expected_deliverables || []) || [];
+              setExpectedDeliverables(expected);
+            }
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to load deliverables:', error);
@@ -119,7 +144,7 @@ export function DeliverablesList({ taskId }: DeliverablesListProps) {
     );
   }
 
-  if (deliverables.length === 0) {
+  if (deliverables.length === 0 && expectedDeliverables.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-mc-text-secondary">
         <div className="text-4xl mb-2">📦</div>
@@ -130,6 +155,28 @@ export function DeliverablesList({ taskId }: DeliverablesListProps) {
 
   return (
     <div className="space-y-3">
+      {/* Expected Deliverables from Pipeline Stage 6 */}
+      {expectedDeliverables.length > 0 && (
+        <div className="mb-4">
+          <h4 className="text-sm font-medium text-mc-text-secondary mb-2">Expected Deliverables (from Pipeline)</h4>
+          <div className="space-y-2">
+            {expectedDeliverables.map((ed, i) => (
+              <div key={`expected-${i}`} className="flex items-start gap-3 p-3 bg-mc-bg border border-dashed border-mc-border rounded-lg opacity-70">
+                <Package className="w-5 h-5 text-mc-text-secondary mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{ed.title}</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-mc-bg-tertiary text-mc-text-secondary">pending</span>
+                  </div>
+                  <p className="text-xs text-mc-text-secondary mt-1">{ed.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Actual Deliverables */}
       {deliverables.map((deliverable) => (
         <div
           key={deliverable.id}

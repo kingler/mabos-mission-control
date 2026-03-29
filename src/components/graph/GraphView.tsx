@@ -56,6 +56,7 @@ export function GraphView({ businessId }: GraphViewProps) {
     showTasks: true,
     showCampaigns: true,
     showInitiatives: true,
+    showSkills: true,
     selectedAgent: null,
   });
 

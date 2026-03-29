@@ -936,6 +936,238 @@ const migrations: Migration[] = [
       console.log('[Migration 017] agent_activities table created');
     }
   },
+  {
+    id: '018',
+    name: 'add_plans_skills_tables',
+    up: (db) => {
+      console.log('[Migration 018] Adding agent_plans, plan_steps, and agent_skills tables...');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_plans (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          goal_id TEXT,
+          title TEXT NOT NULL,
+          source TEXT DEFAULT 'htn-generated',
+          status TEXT DEFAULT 'active',
+          confidence REAL,
+          strategy TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_plans_agent ON agent_plans(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_plans_goal ON agent_plans(goal_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plan_steps (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL REFERENCES agent_plans(id),
+          step_number INTEGER,
+          description TEXT NOT NULL,
+          step_type TEXT DEFAULT 'primitive',
+          assigned_to TEXT,
+          depends_on TEXT,
+          status TEXT DEFAULT 'pending',
+          estimated_duration TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_plan_steps_plan ON plan_steps(plan_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_skills (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          skill_name TEXT NOT NULL,
+          description TEXT,
+          category TEXT,
+          status TEXT DEFAULT 'active',
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_skills_agent ON agent_skills(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_skills_category ON agent_skills(category);
+      `);
+
+      console.log('[Migration 018] Plans, plan_steps, and agent_skills tables created');
+    }
+  },
+  {
+    id: '019',
+    name: 'add_bdi_state_tables',
+    up: (db) => {
+      console.log('[Migration 019] Adding BDI state tables (beliefs, desires, intentions, capabilities, memories, personas)...');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_beliefs (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          category TEXT NOT NULL,
+          belief TEXT NOT NULL,
+          value TEXT,
+          certainty REAL DEFAULT 0.5,
+          source TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_beliefs_agent ON agent_beliefs(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_desires (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          desire_type TEXT NOT NULL,
+          desire TEXT NOT NULL,
+          priority REAL DEFAULT 0.5,
+          importance TEXT,
+          serves TEXT,
+          status TEXT DEFAULT 'active',
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_desires_agent ON agent_desires(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_intentions (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          goal_ref TEXT,
+          plan_ref TEXT,
+          strategy TEXT DEFAULT 'open-minded',
+          status TEXT DEFAULT 'planning',
+          current_step TEXT,
+          progress REAL DEFAULT 0,
+          started_at TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_intentions_agent ON agent_intentions(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_capabilities (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          description TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_capabilities_agent ON agent_capabilities(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_memories (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          category TEXT,
+          content TEXT NOT NULL,
+          logged_at TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_memories_agent ON agent_memories(agent_id);
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_personas (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL UNIQUE,
+          role_title TEXT NOT NULL,
+          reports_to TEXT,
+          direct_reports TEXT,
+          identity TEXT,
+          behavioral_guidelines TEXT,
+          decision_authority TEXT,
+          commitment_strategy TEXT,
+          business_id TEXT DEFAULT 'vividwalls',
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_personas_agent ON agent_personas(agent_id);
+      `);
+
+      console.log('[Migration 019] BDI state tables created');
+    }
+  },
+  {
+    id: '020',
+    name: 'decomposition_pipeline',
+    up: (db) => {
+      console.log('[Migration 020] Creating decomposition pipeline tables and columns...');
+
+      // Pipeline stage storage
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS decomposition_stages (
+          id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL REFERENCES kanban_goals(id) ON DELETE CASCADE,
+          pipeline_run_id TEXT NOT NULL,
+          stage_number INTEGER NOT NULL CHECK (stage_number BETWEEN 1 AND 7),
+          stage_name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending','running','completed','failed','skipped')),
+          agent_id TEXT,
+          input_json TEXT,
+          output_json TEXT,
+          error_message TEXT,
+          started_at TEXT,
+          completed_at TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(pipeline_run_id, stage_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_decomp_goal ON decomposition_stages(goal_id);
+        CREATE INDEX IF NOT EXISTS idx_decomp_run ON decomposition_stages(pipeline_run_id);
+      `);
+
+      // Add decomposition_run_id to tasks
+      const taskCols = db.pragma('table_info(tasks)') as { name: string }[];
+      if (!taskCols.some(c => c.name === 'decomposition_run_id')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN decomposition_run_id TEXT`);
+      }
+
+      // Add goal_type to kanban_goals
+      const goalCols = db.pragma('table_info(kanban_goals)') as { name: string }[];
+      if (!goalCols.some(c => c.name === 'goal_type')) {
+        db.exec(`ALTER TABLE kanban_goals ADD COLUMN goal_type TEXT CHECK (goal_type IN ('achieve','maintain'))`);
+      }
+
+      console.log('[Migration 020] Decomposition pipeline tables and columns created');
+    }
+  },
+  {
+    id: '021',
+    name: 'business_profiles',
+    up: (db) => {
+      console.log('[Migration 021] Creating business_profiles table...');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS business_profiles (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id),
+          business_type TEXT NOT NULL,
+          industry TEXT NOT NULL,
+          description TEXT NOT NULL,
+          company_stage TEXT DEFAULT 'startup',
+          current_revenue TEXT,
+          team_size INTEGER DEFAULT 1,
+          key_products TEXT,
+          primary_channels TEXT,
+          constraints TEXT,
+          vision TEXT,
+          mission TEXT,
+          core_values TEXT,
+          bmc_data TEXT,
+          onboarding_completed_at TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_business_profiles_workspace ON business_profiles(workspace_id);
+      `);
+      console.log('[Migration 021] business_profiles table created');
+    }
+  },
 ];
 
 /**

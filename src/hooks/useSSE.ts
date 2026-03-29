@@ -119,6 +119,24 @@ export function useSSE() {
               addCognitiveActivity(sseEvent.payload as AgentCognitiveActivity);
               break;
 
+            case 'pipeline:stage_update': {
+              const stageData = sseEvent.payload as unknown as {
+                stageNumber: number;
+                stageName: string;
+                status: string;
+                resultSummary?: string;
+                error?: string;
+              };
+              debug.sse('Pipeline stage update', stageData);
+              const { onboardingActions } = useMissionControl.getState();
+              onboardingActions.updatePipelineStage(stageData.stageNumber, {
+                status: stageData.status as 'pending' | 'running' | 'completed' | 'failed',
+                resultSummary: stageData.resultSummary,
+                error: stageData.error,
+              });
+              break;
+            }
+
             default:
               debug.sse('Unknown event type', sseEvent);
           }

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { CheckCircle, Circle, Lock, AlertCircle, Loader2, X } from 'lucide-react';
+import { CheckCircle, Circle, Lock, AlertCircle, Loader2, X, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
+import type { DecompositionStage } from '@/lib/types';
 
 interface PlanningOption {
   id: string;
@@ -43,6 +44,284 @@ interface PlanningState {
   isStarted: boolean;
 }
 
+// ── Pipeline Accordion Sub-Component ──────────────────────────
+
+const STAGE_LABELS: Record<string, string> = {
+  business_goal_generation: 'Business Goal Generation',
+  goal_refinement: 'Goal Refinement & Typing',
+  project_scoping: 'Project Scoping',
+  plan_generation: 'Plan Generation',
+  task_decomposition: 'Task Decomposition',
+  subtask_action_generation: 'Subtask & Action Generation',
+  execution_plan_assembly: 'Execution Plan Assembly',
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    completed: 'bg-green-500/20 text-green-400 border-green-500/30',
+    running: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    pending: 'bg-mc-bg-tertiary text-mc-text-secondary border-mc-border',
+    failed: 'bg-red-500/20 text-red-400 border-red-500/30',
+    skipped: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  };
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded border ${styles[status] || styles.pending}`}>
+      {status}
+    </span>
+  );
+}
+
+function StageOutputRenderer({ stage }: { stage: DecompositionStage }) {
+  if (!stage.output_json) return null;
+  let output: any;
+  try { output = JSON.parse(stage.output_json); } catch { return <pre className="text-xs text-mc-text-secondary overflow-auto max-h-64">{stage.output_json}</pre>; }
+
+  // Stage 1: Goal cards by category
+  if (stage.stage_number === 1 && output.goals) {
+    return (
+      <div className="space-y-2">
+        {output.goals.map((g: any, i: number) => (
+          <div key={i} className="bg-mc-bg border border-mc-border rounded p-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-sm">{g.title}</span>
+              <span className="text-xs text-mc-text-secondary">{g.category}</span>
+            </div>
+            <p className="text-xs text-mc-text-secondary mt-1">{g.description}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Stage 2: Refinement tree
+  if (stage.stage_number === 2 && output.refinement_tree) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 mb-2">
+          <span className={`text-xs px-2 py-0.5 rounded ${output.goal_type === 'achieve' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
+            {output.goal_type}
+          </span>
+        </div>
+        <pre className="text-xs text-mc-text-secondary overflow-auto max-h-48">{JSON.stringify(output.refinement_tree, null, 2)}</pre>
+        {output.obstacles?.length > 0 && (
+          <div className="mt-2">
+            <span className="text-xs font-medium text-mc-text-secondary">Obstacles:</span>
+            {output.obstacles.map((o: any, i: number) => (
+              <div key={i} className="text-xs text-mc-text-secondary ml-2">- {o.title} ({o.severity})</div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Stage 3: Agent team table
+  if (stage.stage_number === 3 && output.campaigns) {
+    return (
+      <div className="space-y-3">
+        {output.campaigns.map((c: any, i: number) => (
+          <div key={i} className="bg-mc-bg border border-mc-border rounded p-2">
+            <div className="font-medium text-sm mb-1">{c.title}</div>
+            {c.agent_team?.map((a: any, j: number) => (
+              <div key={j} className="text-xs text-mc-text-secondary flex items-center gap-1">
+                <span className={`px-1 rounded ${a.role === 'lead' ? 'bg-mc-accent/20 text-mc-accent' : ''}`}>{a.role}</span>
+                <span>{a.agent_name || a.agent_id}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Stage 4: Plan alternatives
+  if (stage.stage_number === 4 && output.plans_by_campaign) {
+    return (
+      <div className="space-y-3">
+        {output.plans_by_campaign.map((pc: any, i: number) => (
+          <div key={i}>
+            <div className="text-sm font-medium mb-1">{pc.campaign_title}</div>
+            {pc.initiatives?.map((init: any, j: number) => (
+              <div key={j} className="bg-mc-bg border border-mc-border rounded p-2 mb-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">{init.title}</span>
+                  <span className="text-xs text-mc-text-secondary">{Math.round((init.confidence || 0) * 100)}% confidence</span>
+                </div>
+                {init.guard_condition && <div className="text-xs text-mc-text-secondary mt-1">Guard: {init.guard_condition}</div>}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Stage 5: Task list with dependencies
+  if (stage.stage_number === 5 && output.tasks_by_initiative) {
+    return (
+      <div className="space-y-2">
+        {output.tasks_by_initiative.flatMap((ti: any) => ti.tasks || []).map((t: any, i: number) => (
+          <div key={i} className="text-xs flex items-center gap-2">
+            <Circle className="w-3 h-3 text-mc-text-secondary" />
+            <span>{t.title}</span>
+            {t.dependsOnIndex !== null && t.dependsOnIndex !== undefined && (
+              <span className="text-mc-text-secondary">depends on #{t.dependsOnIndex}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Stage 6: Actions with tool icons
+  if (stage.stage_number === 6 && output.actions_by_task) {
+    return (
+      <div className="space-y-2">
+        {output.actions_by_task.map((at: any, i: number) => (
+          <div key={i} className="bg-mc-bg border border-mc-border rounded p-2">
+            <div className="text-sm font-medium mb-1">{at.task_title}</div>
+            {at.actions?.map((a: any, j: number) => (
+              <div key={j} className="text-xs text-mc-text-secondary ml-2 flex items-center gap-1">
+                <span className="text-mc-accent">{a.tool === 'manual' ? '👤' : '🔧'}</span>
+                <span>{a.description}</span>
+                <span className="text-mc-text-secondary opacity-50">({a.tool})</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Stage 7: DAG summary
+  if (stage.stage_number === 7 && output.dag) {
+    return (
+      <div className="space-y-2">
+        <div className="text-xs text-mc-text-secondary">
+          {output.dag.nodes?.length || 0} nodes, {output.dag.edges?.length || 0} edges
+        </div>
+        {output.critical_path && (
+          <div className="text-xs"><span className="font-medium">Critical path:</span> {output.critical_path.length} tasks</div>
+        )}
+        {output.success_metrics && (
+          <div className="text-xs space-y-1">
+            <div>Est. hours: {output.success_metrics.total_estimated_hours}</div>
+            <div>Critical path: {output.success_metrics.critical_path_hours}h</div>
+            <div>Tasks: {output.success_metrics.task_count}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Fallback: raw JSON
+  return <pre className="text-xs text-mc-text-secondary overflow-auto max-h-48">{JSON.stringify(output, null, 2)}</pre>;
+}
+
+function PipelineAccordion({ runId }: { runId: string }) {
+  const [stages, setStages] = useState<DecompositionStage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedStage, setExpandedStage] = useState<number | null>(null);
+  const [goalTitle, setGoalTitle] = useState<string>('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/kanban/decomposition/${runId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setStages(data.stages || []);
+          setGoalTitle(data.goal?.title || '');
+          // Auto-expand the first non-pending stage
+          const active = data.stages?.find((s: DecompositionStage) => s.status === 'running' || s.status === 'completed');
+          if (active) setExpandedStage(active.stage_number);
+        }
+      } catch (err) {
+        console.error('Failed to load pipeline:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [runId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="w-6 h-6 animate-spin text-mc-accent" />
+        <span className="ml-2 text-mc-text-secondary">Loading pipeline...</span>
+      </div>
+    );
+  }
+
+  const completedCount = stages.filter(s => s.status === 'completed').length;
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="font-medium">Goal Decomposition Pipeline</h3>
+          {goalTitle && <p className="text-sm text-mc-text-secondary">{goalTitle}</p>}
+        </div>
+        <span className="text-sm text-mc-text-secondary">{completedCount}/7 stages</span>
+      </div>
+
+      {/* Progress bar */}
+      <div className="w-full bg-mc-bg-tertiary rounded-full h-1.5 mb-4">
+        <div
+          className="bg-mc-accent h-1.5 rounded-full transition-all"
+          style={{ width: `${(completedCount / 7) * 100}%` }}
+        />
+      </div>
+
+      {/* Stage accordion */}
+      <div className="space-y-1">
+        {stages.map((stage) => {
+          const isExpanded = expandedStage === stage.stage_number;
+          const isPending = stage.status === 'pending';
+
+          return (
+            <div key={stage.id} className={`border rounded-lg ${isPending ? 'border-mc-border opacity-60' : 'border-mc-border'}`}>
+              <button
+                onClick={() => setExpandedStage(isExpanded ? null : stage.stage_number)}
+                className="w-full flex items-center gap-3 p-3 text-left hover:bg-mc-bg-tertiary/50 rounded-lg"
+              >
+                {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                <span className="text-sm font-medium flex-1">
+                  Stage {stage.stage_number}: {STAGE_LABELS[stage.stage_name] || stage.stage_name}
+                </span>
+                <StatusBadge status={stage.status} />
+                {stage.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-blue-400" />}
+              </button>
+
+              {isExpanded && (
+                <div className="px-3 pb-3 pt-0">
+                  {stage.status === 'completed' && <StageOutputRenderer stage={stage} />}
+                  {stage.status === 'running' && (
+                    <div className="flex items-center gap-2 text-sm text-blue-400">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Processing...</span>
+                    </div>
+                  )}
+                  {stage.status === 'failed' && (
+                    <div className="text-sm text-red-400">
+                      <AlertCircle className="w-4 h-4 inline mr-1" />
+                      {stage.error_message || 'Stage failed'}
+                    </div>
+                  )}
+                  {stage.status === 'pending' && (
+                    <div className="text-sm text-mc-text-secondary">Waiting for previous stages to complete...</div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 interface PlanningTabProps {
   taskId: string;
   onSpecLocked?: () => void;
@@ -60,6 +339,7 @@ export function PlanningTab({ taskId, onSpecLocked }: PlanningTabProps) {
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
   const [retryingDispatch, setRetryingDispatch] = useState(false);
   const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+  const [decompositionRunId, setDecompositionRunId] = useState<string | null>(null);
 
   // Refs to track polling state without triggering re-renders
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -79,6 +359,10 @@ export function PlanningTab({ taskId, onSpecLocked }: PlanningTabProps) {
         const data = await res.json();
         setState(data);
         currentQuestionRef.current = data.currentQuestion?.question;
+        // Check if task has a decomposition pipeline run
+        if (data.decomposition_run_id) {
+          setDecompositionRunId(data.decomposition_run_id);
+        }
         // Don't call onSpecLocked on initial load - only when planning completes actively
       }
     } catch (err) {
@@ -401,6 +685,11 @@ export function PlanningTab({ taskId, onSpecLocked }: PlanningTabProps) {
         <span className="ml-2 text-mc-text-secondary">Loading planning state...</span>
       </div>
     );
+  }
+
+  // Pipeline mode: show decomposition accordion if this task has a pipeline run
+  if (decompositionRunId) {
+    return <PipelineAccordion runId={decompositionRunId} />;
   }
 
   // Planning complete - show spec and agents
